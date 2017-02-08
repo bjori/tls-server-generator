@@ -19,22 +19,24 @@
 #define CERT_CA "ca.pem"
 #define INTERMEDIATE_CA "intermediate_ca.pem"
 
-
 // Holds all the TLS options configurable through the hostname.
 typedef struct _tls_options {
    // TLS Options
-   char *ciphers;         // Acceptable TLS cipher suites
-   int tls_versions;      // Acceptable TLS_VERSION_* versions
-   int tls_compression;   // Enable TLS compression
+   char *ciphers;       // Acceptable TLS cipher suites
+   int tls_versions;    // Acceptable TLS_VERSION_* versions
+   int tls_compression; // Enable TLS compression
+
+   // Use hard coded server PEM file
+   char *keyfile;
 
    // Certificate Generation Options
-   char *cn;              // CN: Common Name
-   char *issuer;          // Signing CA: root, intermediate, unknown
-   int64_t not_before;    // Not valid before datetime
-   int64_t not_after;     // Not valid after datetime
-   char **san;            // SAN: Subject Alt Names, list of IP Addresses or DNS names
+   char *cn;           // CN: Common Name
+   char *issuer;       // Signing CA: root, intermediate, unknown
+   int64_t not_before; // Not valid before datetime
+   int64_t not_after;  // Not valid after datetime
+   char **san; // SAN: Subject Alt Names, list of IP Addresses or DNS names
    // Basic Constraints
-   int cert_authority;    // Is Certificate Authority
+   int cert_authority; // Is Certificate Authority
    // Key Usage
    int key_cert_sign;     // Key Cert Sign
    int digital_signature; // Digital Signature
@@ -42,12 +44,42 @@ typedef struct _tls_options {
    int key_encipherment;  // Key Encipherment
    int data_encipherment; // Data Encipherment
    // Extended Key Usage
-   int server_auth;       // Server Authentication
-   int client_auth;       // Client Authentication
-   int code_signing;      // Code Signing
-   int email_protection;  // Email Protection
-   int time_stamping;     // Time Stamping
+   int server_auth;      // Server Authentication
+   int client_auth;      // Client Authentication
+   int code_signing;     // Code Signing
+   int email_protection; // Email Protection
+   int time_stamping;    // Time Stamping
 } tls_options;
+
+void
+_free_tls_options (tls_options **options_ptr)
+{
+   if (options == NULL || *options == NULL) {
+      return;
+   }
+   tls_options *options = *options_ptr;
+
+   if (options->ciphers) {
+      free (options->ciphers);
+   }
+   if (options->keyfile) {
+      free (options->keyfile);
+   }
+   if (options->cn) {
+      free (options->cn);
+   }
+   if (options->issuer) {
+      free (options->issuer);
+   }
+   if (options->san) {
+      for (int i = 0; options->san[i]; i++) {
+         free (options->san[i]);
+      }
+      free (options->san);
+   }
+   free (options);
+   *options_ptr = NULL;
+}
 
 void
 _init_openssl ()
@@ -93,6 +125,9 @@ _mongoc_ssl_setup_pem_file (SSL_CTX *ssl_ctx, const char *pem_file)
 int
 _mongoc_decode_hostname (const char *servername, tls_options *settings)
 {
+   if (servername == NULL || tls_options == NULL) {
+      return 0;
+   }
    settings->ciphers = "HIGH:!EXPORT:!aNULL@STRENGTH";
 
    return 1;
