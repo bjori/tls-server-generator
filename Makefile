@@ -8,7 +8,7 @@ SUPPRESS := @
 
 app:
 	@echo [CC] $@
-	$(SUPPRESS) $(CC) $(CFLAGS) $(INCLUDES) -o $@ server.c $(LFLAGS) $(LIBS)
+	$(SUPPRESS) $(CC) $(CFLAGS) $(INCLUDES) -o $@ server.c mongoc-b64.c $(LFLAGS) $(LIBS)
 
 test: app
 	$(SUPPRESS) PING=${PING} sh test.sh

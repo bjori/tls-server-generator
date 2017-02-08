@@ -17,6 +17,7 @@
 #include <openssl/x509.h>
 #include <openssl/x509v3.h>
 
+#include "mongoc-b64.h"
 
 #define CERT_GOOD_SERVER "server.pem"
 #define CERT_CA "ca.pem"
