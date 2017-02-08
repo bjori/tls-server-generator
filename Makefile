@@ -1,3 +1,4 @@
+PING=/home/bjori/Sources/mongoc/mongoc-ping
 CFLAGS += -Wall -g -O0
 INCLUDES = -I.
 LFLAGS = -lpthread -lssl -lcrypto
@@ -9,7 +10,10 @@ app:
 	@echo [CC] $@
 	$(SUPPRESS) $(CC) $(CFLAGS) $(INCLUDES) -o $@ server.c $(LFLAGS) $(LIBS)
 
-.PHONY: app
+test:
+	$(SUPPRESS) PING=${PING} sh test.sh
+
+.PHONY: app test
 
 all: app
 
