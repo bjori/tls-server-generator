@@ -54,7 +54,7 @@ typedef struct _tls_options {
 void
 _free_tls_options (tls_options **options_ptr)
 {
-   if (options == NULL || *options == NULL) {
+   if (options_ptr == NULL || *options_ptr == NULL) {
       return;
    }
    tls_options *options = *options_ptr;
@@ -125,7 +125,7 @@ _mongoc_ssl_setup_pem_file (SSL_CTX *ssl_ctx, const char *pem_file)
 int
 _mongoc_decode_hostname (const char *servername, tls_options *settings)
 {
-   if (servername == NULL || tls_options == NULL) {
+   if (servername == NULL || settings == NULL) {
       return 0;
    }
    settings->ciphers = "HIGH:!EXPORT:!aNULL@STRENGTH";
