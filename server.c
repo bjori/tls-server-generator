@@ -21,7 +21,7 @@
 
 
 // Holds all the TLS options configurable through the hostname.
-struct tls_options {
+typedef struct _tls_options {
    // TLS Options
    char *ciphers;         // Acceptable TLS cipher suites
    int tls_versions;      // Acceptable TLS_VERSION_* versions
@@ -47,7 +47,7 @@ struct tls_options {
    int code_signing;      // Code Signing
    int email_protection;  // Email Protection
    int time_stamping;     // Time Stamping
-};
+} tls_options;
 
 void
 _init_openssl ()
@@ -90,10 +90,22 @@ _mongoc_ssl_setup_pem_file (SSL_CTX *ssl_ctx, const char *pem_file)
    return 1;
 }
 
+int
+_mongoc_decode_hostname (const char *servername, tls_options *settings)
+{
+   settings->ciphers = "HIGH:!EXPORT:!aNULL@STRENGTH";
+
+   return 1;
+}
+
 SSL_CTX *
 _mongoc_ssl_make_ctx_for (const char *servername, const SSL_METHOD *method)
 {
    SSL_CTX *ssl_ctx;
+   tls_options *settings = calloc (sizeof *settings, 1);
+
+   _mongoc_decode_hostname (servername, settings);
+
 
    if (!strcmp (servername, "localhost")) {
       ssl_ctx = SSL_CTX_new (method);
