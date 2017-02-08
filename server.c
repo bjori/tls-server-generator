@@ -16,9 +16,38 @@
 
 
 #define CERT_GOOD_SERVER "server.pem"
-#define CERT_GOOD_CLIENT "client.pem"
 #define CERT_CA "ca.pem"
+#define INTERMEDIATE_CA "intermediate_ca.pem"
 
+
+// Holds all the TLS options configurable through the hostname.
+struct tls_options {
+   // TLS Options
+   char *ciphers;         // Acceptable TLS cipher suites
+   int tls_versions;      // Acceptable TLS_VERSION_* versions
+   int tls_compression;   // Enable TLS compression
+
+   // Certificate Generation Options
+   char *cn;              // CN: Common Name
+   char *issuer;          // Signing CA: root, intermediate, unknown
+   int64_t not_before;    // Not valid before datetime
+   int64_t not_after;     // Not valid after datetime
+   char **san;            // SAN: Subject Alt Names, list of IP Addresses or DNS names
+   // Basic Constraints
+   int cert_authority;    // Is Certificate Authority
+   // Key Usage
+   int key_cert_sign;     // Key Cert Sign
+   int digital_signature; // Digital Signature
+   int non_repudiation;   // Non Repudiation
+   int key_encipherment;  // Key Encipherment
+   int data_encipherment; // Data Encipherment
+   // Extended Key Usage
+   int server_auth;       // Server Authentication
+   int client_auth;       // Client Authentication
+   int code_signing;      // Code Signing
+   int email_protection;  // Email Protection
+   int time_stamping;     // Time Stamping
+};
 
 void
 _init_openssl ()
