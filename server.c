@@ -11,6 +11,173 @@
 #include <unistd.h>
 #include <fcntl.h>
 
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+
+
+
+#define CERT_GOOD_SERVER "server.pem"
+#define CERT_GOOD_CLIENT "client.pem"
+#define CERT_CA "ca.pem"
+
+
+void
+_init_openssl ()
+{
+   SSL_load_error_strings ();
+   SSL_library_init ();
+}
+
+int
+_mongoc_ssl_setup_ca (SSL_CTX *ssl_ctx,
+                      const char *ca_file,
+                      const char *ca_path)
+{
+   if ((ca_file || ca_path) &&
+       !SSL_CTX_load_verify_locations (ssl_ctx, ca_file, ca_path)) {
+      return 0;
+   }
+   if (!SSL_CTX_set_default_verify_paths (ssl_ctx)) {
+      return 0;
+   }
+
+   return 1;
+}
+
+int
+_mongoc_ssl_setup_pem_file (SSL_CTX *ssl_ctx, const char *pem_file)
+{
+   if (!SSL_CTX_use_certificate_chain_file (ssl_ctx, pem_file)) {
+      return 0;
+   }
+
+   if (!SSL_CTX_use_PrivateKey_file (ssl_ctx, pem_file, SSL_FILETYPE_PEM)) {
+      return 0;
+   }
+
+   if (!SSL_CTX_check_private_key (ssl_ctx)) {
+      return 0;
+   }
+
+   return 1;
+}
+
+SSL_CTX*
+_mongoc_ssl_make_ctx_for (const char *servername, const SSL_METHOD *method)
+{
+   SSL_CTX *ssl_ctx;
+
+   if (!strcmp(servername, "localhost")) {
+      ssl_ctx = SSL_CTX_new (method);
+      //if (!SSL_CTX_set_cipher_list (ssl_ctx, "EXPORT")) {
+      if (!SSL_CTX_set_cipher_list (ssl_ctx, "HIGH:!EXPORT:!aNULL@STRENGTH")) {
+         SSL_CTX_free (ssl_ctx);
+         return NULL;
+      }
+
+      if (!_mongoc_ssl_setup_ca (ssl_ctx, CERT_CA, NULL)) {
+         SSL_CTX_free (ssl_ctx);
+         return NULL;
+      }
+
+      if (!_mongoc_ssl_setup_pem_file (ssl_ctx, CERT_GOOD_SERVER)) {
+         SSL_CTX_free (ssl_ctx);
+         return NULL;
+      }
+
+      fprintf(stderr, "Certificated prepped and good to go!\n");
+      return ssl_ctx;
+   }
+
+   return NULL;
+}
+static int
+_mongoc_ssl_servername_callback(SSL *ssl, int *ad, void *arg)
+{
+   SSL_CTX *ctx;
+   const char* servername;
+
+   if (ssl == NULL) {
+      return SSL_TLSEXT_ERR_NOACK;
+   }
+
+   servername = SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name);
+   if (!servername) {
+      return SSL_TLSEXT_ERR_NOACK;
+   }
+
+
+   fprintf(stderr, "Making CTX for %s\n", servername);
+   ctx = _mongoc_ssl_make_ctx_for (servername, SSL_get_ssl_method (ssl));
+
+   if (ctx) {
+      SSL_set_SSL_CTX(ssl, ctx);
+      return SSL_TLSEXT_ERR_OK;
+   }
+
+   return SSL_TLSEXT_ERR_NOACK;
+}
+SSL_CTX *
+mongoc_ssl_ctx_new ()
+{
+   SSL_CTX *ssl_ctx;
+   const SSL_METHOD *method;
+   int options;
+
+
+#if OPENSSL_VERSION_NUMBER >= 0x1010000fL
+   method = TLS_server_method ();
+#else
+   method = SSLv23_server_method ();
+#endif
+
+   ssl_ctx = SSL_CTX_new (method);
+   if (!ssl_ctx) {
+      return NULL;
+   }
+   options = SSL_OP_ALL | SSL_OP_NO_COMPRESSION | SSL_OP_SINGLE_DH_USE;
+
+#if OPENSSL_VERSION_NUMBER >= 0x1010000fL
+   SSL_CTX_set_min_proto_version (ssl_ctx, SSL3_VERSION);
+#else
+   options |= SSL_OP_NO_SSLv2;
+#endif
+
+   SSL_CTX_set_options (ssl_ctx, options);
+
+   SSL_CTX_set_tlsext_servername_callback (ssl_ctx, _mongoc_ssl_servername_callback);
+
+   //SSL_CTX_set_verify (ssl_ctx, SSL_VERIFY_PEER, NULL);
+   SSL_CTX_set_mode (ssl_ctx, SSL_MODE_AUTO_RETRY);
+
+   return ssl_ctx;
+}
+
+SSL *
+mongoc_ssl_new (SSL_CTX *ssl_ctx)
+{
+   SSL *ssl = NULL;
+
+   ssl = SSL_new (ssl_ctx);
+
+   return ssl;
+}
+
+SSL *
+mongoc_stream_ssl_wrap (int fd)
+{
+   SSL_CTX *ssl_ctx = NULL;
+   SSL *ssl = NULL;
+
+   ssl_ctx = mongoc_ssl_ctx_new ();
+   ssl = mongoc_ssl_new (ssl_ctx);
+   SSL_CTX_free (ssl_ctx);
+
+   SSL_set_fd (ssl, fd);
+   SSL_set_accept_state (ssl);
+
+   return ssl;
+}
 
 typedef int (*cb) (int fd, __CONST_SOCKADDR_ARG, socklen_t addrlen);
 
@@ -39,13 +206,18 @@ _socket (int port, cb func)
 }
 
 int
-_read_write (int rfd, int wfd)
+_read_write (int polled, SSL *ssl, int fd_ssl, int fd_plain)
 {
-   char buffer[1024];
+   char buffer[8192];
    ssize_t size = 0;
 
-   size = recv (rfd, buffer, sizeof (buffer), 0);
-   write (wfd, buffer, size);
+   if (polled == fd_ssl) {
+      size = SSL_read (ssl, buffer, sizeof (buffer));
+      write (fd_plain, buffer, size);
+   } else {
+      size = recv (fd_plain, buffer, sizeof (buffer), 0);
+      SSL_write (ssl, buffer, size);
+   }
 
    return size > 0;
 }
@@ -59,11 +231,21 @@ worker (void *arg)
    int success;
    int sockets = 2;
    struct pollfd fds[sockets];
+   SSL *ssl;
 
    fd_mongo = _socket (27017, connect);
    if (!fd_mongo) {
       perror ("connect failed");
       return (void *) 1;
+   }
+
+   _init_openssl ();
+
+   ssl = mongoc_stream_ssl_wrap (fd_client);
+   int ret = SSL_do_handshake (ssl);
+   if (ret < 1) {
+      fprintf (stderr, "Handhsake failed\n");
+      goto fail;
    }
 
    fds[0].fd = fd_client;
@@ -72,19 +254,23 @@ worker (void *arg)
    fds[1].events = POLLIN;
 
    do {
-      success = poll (fds, sockets, 10);
+      success = poll (fds, sockets, 1000);
 
       for (n = 0; n < sockets; ++n) {
          if (fds[n].revents & POLLIN) {
-            int fd = fds[n].fd == fd_mongo ? fd_client : fd_mongo;
-            success = _read_write (fds[n].fd, fd);
+            success = _read_write (fds[n].fd, ssl, fd_client, fd_mongo);
          }
       }
    } while (success > 0);
 
+fail:
+   SSL_shutdown (ssl);
+   SSL_free (ssl);
+
    close (fd_client);
    close (fd_mongo);
    free (arg);
+   fprintf(stderr, "Worker done\n");
    return (void *) EXIT_SUCCESS;
 }
 
@@ -94,8 +280,8 @@ main (int argc, char *argv[])
    int sd;
    int fd;
    int *args;
-   struct sockaddr_in addr;
    int success;
+
 
    sd = _socket (8888, bind);
    if (!sd) {
