@@ -15,7 +15,6 @@
 #include <openssl/err.h>
 
 
-
 #define CERT_GOOD_SERVER "server.pem"
 #define CERT_GOOD_CLIENT "client.pem"
 #define CERT_CA "ca.pem"
@@ -62,14 +61,14 @@ _mongoc_ssl_setup_pem_file (SSL_CTX *ssl_ctx, const char *pem_file)
    return 1;
 }
 
-SSL_CTX*
+SSL_CTX *
 _mongoc_ssl_make_ctx_for (const char *servername, const SSL_METHOD *method)
 {
    SSL_CTX *ssl_ctx;
 
-   if (!strcmp(servername, "localhost")) {
+   if (!strcmp (servername, "localhost")) {
       ssl_ctx = SSL_CTX_new (method);
-      //if (!SSL_CTX_set_cipher_list (ssl_ctx, "EXPORT")) {
+      // if (!SSL_CTX_set_cipher_list (ssl_ctx, "EXPORT")) {
       if (!SSL_CTX_set_cipher_list (ssl_ctx, "HIGH:!EXPORT:!aNULL@STRENGTH")) {
          SSL_CTX_free (ssl_ctx);
          return NULL;
@@ -85,33 +84,33 @@ _mongoc_ssl_make_ctx_for (const char *servername, const SSL_METHOD *method)
          return NULL;
       }
 
-      fprintf(stderr, "Certificated prepped and good to go!\n");
+      fprintf (stderr, "Certificated prepped and good to go!\n");
       return ssl_ctx;
    }
 
    return NULL;
 }
 static int
-_mongoc_ssl_servername_callback(SSL *ssl, int *ad, void *arg)
+_mongoc_ssl_servername_callback (SSL *ssl, int *ad, void *arg)
 {
    SSL_CTX *ctx;
-   const char* servername;
+   const char *servername;
 
    if (ssl == NULL) {
       return SSL_TLSEXT_ERR_NOACK;
    }
 
-   servername = SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name);
+   servername = SSL_get_servername (ssl, TLSEXT_NAMETYPE_host_name);
    if (!servername) {
       return SSL_TLSEXT_ERR_NOACK;
    }
 
 
-   fprintf(stderr, "Making CTX for %s\n", servername);
+   fprintf (stderr, "Making CTX for %s\n", servername);
    ctx = _mongoc_ssl_make_ctx_for (servername, SSL_get_ssl_method (ssl));
 
    if (ctx) {
-      SSL_set_SSL_CTX(ssl, ctx);
+      SSL_set_SSL_CTX (ssl, ctx);
       return SSL_TLSEXT_ERR_OK;
    }
 
@@ -145,9 +144,10 @@ mongoc_ssl_ctx_new ()
 
    SSL_CTX_set_options (ssl_ctx, options);
 
-   SSL_CTX_set_tlsext_servername_callback (ssl_ctx, _mongoc_ssl_servername_callback);
+   SSL_CTX_set_tlsext_servername_callback (ssl_ctx,
+                                           _mongoc_ssl_servername_callback);
 
-   //SSL_CTX_set_verify (ssl_ctx, SSL_VERIFY_PEER, NULL);
+   // SSL_CTX_set_verify (ssl_ctx, SSL_VERIFY_PEER, NULL);
    SSL_CTX_set_mode (ssl_ctx, SSL_MODE_AUTO_RETRY);
 
    return ssl_ctx;
@@ -244,6 +244,7 @@ worker (void *arg)
    ssl = mongoc_stream_ssl_wrap (fd_client);
    int ret = SSL_do_handshake (ssl);
    if (ret < 1) {
+      /* should the test suite determine if it failed or not? */
       fprintf (stderr, "Handhsake failed\n");
       goto fail;
    }
@@ -270,7 +271,7 @@ fail:
    close (fd_client);
    close (fd_mongo);
    free (arg);
-   fprintf(stderr, "Worker done\n");
+   fprintf (stderr, "Worker done\n");
    return (void *) EXIT_SUCCESS;
 }
 
