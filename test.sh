@@ -5,7 +5,8 @@ ROOT=$(dirname $PING)
 run_test() {
    uri=$1
    result="FAILURE";
-   if $PING "$i" &>/dev/null; then
+   
+   if $PING "$i" >/dev/null; then
       result="SUCCESS";
    fi
    printf "%10s: %s\n" "$result" "$uri"
