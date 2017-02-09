@@ -54,7 +54,7 @@
 
 #define TOP_LEVEL_DOMAIN ".vcap.me"
 
-#ifndef __CONST_SOCKADDR_ARG
+#ifdef __APPLE__
 typedef const struct sockaddr *__CONST_SOCKADDR_ARG;
 #endif
 
