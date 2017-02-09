@@ -10,8 +10,11 @@ app:
 	@echo [CC] $@
 	$(SUPPRESS) $(CC) $(CFLAGS) $(INCLUDES) -o $@ server.c $(LFLAGS) $(LIBS)
 
-test:
+test: app
 	$(SUPPRESS) PING=${PING} sh test.sh
+
+debug: app
+	$(SUPPRESS) gdb --args app
 
 .PHONY: app test
 

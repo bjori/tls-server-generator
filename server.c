@@ -13,11 +13,40 @@
 
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+#include <openssl/bio.h>
+#include <openssl/x509.h>
+#include <openssl/x509v3.h>
 
 
 #define CERT_GOOD_SERVER "server.pem"
 #define CERT_CA "ca.pem"
 #define INTERMEDIATE_CA "intermediate_ca.pem"
+
+#define BASIC_CONSTRAINTS_CA_TRUE 1 << 0
+#define BASIC_CONSTRAINTS_CA_FALSE 1 << 1
+
+#define KEY_USAGE_DIGITALSIGNATURE 1 << 0
+#define KEY_USAGE_NONREPUDIATION 1 << 1
+#define KEY_USAGE_KEYENCIPHERMENT 1 << 2
+#define KEY_USAGE_DATAENCIPHERMENT 1 << 3
+#define KEY_USAGE_KEYAGREEMENT 1 << 4
+#define KEY_USAGE_KEYCERTSIGN 1 << 5
+#define KEY_USAGE_CRLSIGN 1 << 6
+#define KEY_USAGE_ENCIPHERONLY 1 << 7
+#define KEY_USAGE_DECIPHERONLY 1 << 8
+
+#define EXT_KEY_USAGE_SERVERAUTH 1 << 0
+#define EXT_KEY_USAGE_CLIENTAUTH 1 << 1
+#define EXT_KEY_USAGE_CODESIGNING 1 << 2
+#define EXT_KEY_USAGE_EMAILPROTECTION 1 << 3
+#define EXT_KEY_USAGE_TIMESTAMPING 1 << 4
+#define EXT_KEY_USAGE_MSCODEIND 1 << 5
+#define EXT_KEY_USAGE_MSCODECOM 1 << 6
+#define EXT_KEY_USAGE_MSCTLSIGN 1 << 7
+#define EXT_KEY_USAGE_MSSGC 1 << 8
+#define EXT_KEY_USAGE_MSEFS 1 << 9
+#define EXT_KEY_USAGE_NSSGC 1 << 10
+
 
 // Holds all the TLS options configurable through the hostname.
 typedef struct _tls_options {
@@ -28,27 +57,22 @@ typedef struct _tls_options {
 
    // Use hard coded server PEM file
    char *keyfile;
+   char *issuerfile;
 
    // Certificate Generation Options
    char *cn;           // CN: Common Name
    char *issuer;       // Signing CA: root, intermediate, unknown
    int64_t not_before; // Not valid before datetime
    int64_t not_after;  // Not valid after datetime
-   char **san; // SAN: Subject Alt Names, list of IP Addresses or DNS names
+   char *san; // SAN: Subject Alt Names, list of IP Addresses or DNS names
+
    // Basic Constraints
-   int cert_authority; // Is Certificate Authority
+   int basic_constraints;
+
    // Key Usage
-   int key_cert_sign;     // Key Cert Sign
-   int digital_signature; // Digital Signature
-   int non_repudiation;   // Non Repudiation
-   int key_encipherment;  // Key Encipherment
-   int data_encipherment; // Data Encipherment
+   int key_usage;
    // Extended Key Usage
-   int server_auth;      // Server Authentication
-   int client_auth;      // Client Authentication
-   int code_signing;     // Code Signing
-   int email_protection; // Email Protection
-   int time_stamping;    // Time Stamping
+   int ext_key_usage;
 } tls_options;
 
 void
@@ -72,9 +96,6 @@ _free_tls_options (tls_options **options_ptr)
       free (options->issuer);
    }
    if (options->san) {
-      for (int i = 0; options->san[i]; i++) {
-         free (options->san[i]);
-      }
       free (options->san);
    }
    free (options);
@@ -125,11 +146,312 @@ _mongoc_ssl_setup_pem_file (SSL_CTX *ssl_ctx, const char *pem_file)
 int
 _mongoc_decode_hostname (const char *servername, tls_options *settings)
 {
-   if (servername == NULL || settings == NULL) {
+   if (!servername || !settings) {
       return 0;
    }
-   settings->ciphers = "HIGH:!EXPORT:!aNULL@STRENGTH";
 
+   settings->ciphers = "HIGH:!EXPORT:!aNULL@STRENGTH";
+   settings->cn = (char *) servername;
+   settings->san = (char *) "DNS:localhost,IP:192.168.0.1";
+   settings->issuer = "root";   // Signing CA: root, intermediate, unknown
+   settings->not_before = 2016; // Not valid before datetime
+   settings->not_after = 2017;  // Not valid after datetime
+
+   settings->basic_constraints = BASIC_CONSTRAINTS_CA_FALSE;
+   settings->key_usage = KEY_USAGE_DIGITALSIGNATURE;
+   settings->ext_key_usage = EXT_KEY_USAGE_SERVERAUTH |
+                             EXT_KEY_USAGE_CLIENTAUTH |
+                             EXT_KEY_USAGE_CODESIGNING;
+
+   return 1;
+}
+
+
+int
+_mongoc_ssl_setup_certs (SSL_CTX *ssl_ctx, const char *ca, const char *private)
+{
+   if (!_mongoc_ssl_setup_ca (ssl_ctx, ca, NULL)) {
+      return 0;
+   }
+
+   if (!_mongoc_ssl_setup_pem_file (ssl_ctx, private)) {
+      return 0;
+   }
+   return 1;
+}
+
+void
+fail (const char *msg)
+{
+   fprintf (stderr, "%s\n", msg);
+   abort ();
+}
+
+int
+_mongoc_generate_csr (const tls_options *settings)
+{
+   RSA *rsa;
+   EVP_PKEY *pkey;
+   X509_REQ *x509req;
+   X509_NAME *name;
+   BIO *out;
+
+   pkey = EVP_PKEY_new ();
+   if (!pkey) {
+      fail ("couldn't generate key");
+   }
+
+   rsa = RSA_generate_key (2048, RSA_F4, NULL, NULL);
+   if (!EVP_PKEY_assign_RSA (pkey, rsa)) {
+      fail ("couldn't assign the key");
+   }
+
+   x509req = X509_REQ_new ();
+   X509_REQ_set_pubkey (x509req, pkey);
+
+   name = X509_NAME_new ();
+   X509_NAME_add_entry_by_txt (
+      name, "C", MBSTRING_ASC, (const unsigned char *) "IS", -1, -1, 0);
+   X509_NAME_add_entry_by_txt (
+      name, "O", MBSTRING_ASC, (const unsigned char *) "MongoDB", -1, -1, 0);
+   X509_NAME_add_entry_by_txt (
+      name,
+      "OU",
+      MBSTRING_ASC,
+      (const unsigned char *) "SkunkWorks tls-server-generator",
+      -1,
+      -1,
+      0);
+   X509_NAME_add_entry_by_txt (name,
+                               "CN",
+                               MBSTRING_ASC,
+                               (const unsigned char *) settings->cn,
+                               -1,
+                               -1,
+                               0);
+
+   X509_REQ_set_subject_name (x509req, name);
+   X509_REQ_set_version (x509req, 2);
+
+   if (!X509_REQ_sign (x509req, pkey, EVP_sha1 ())) {
+      fail ("req_sign");
+   }
+
+   out = BIO_new_file ("server-gen.key.pem", "wb");
+   // out = BIO_new(BIO_s_mem());
+   if (!PEM_write_bio_PrivateKey (out, pkey, NULL, NULL, 0, NULL, NULL)) {
+      fail ("can't write private key");
+   }
+
+   BIO_free_all (out);
+   // out = BIO_new(BIO_s_mem());
+   out = BIO_new_file ("server-gen.csr.pem", "wb");
+   if (!PEM_write_bio_X509_REQ_NEW (out, x509req)) {
+      fail ("coudln't write csr");
+   }
+   BIO_free_all (out);
+
+   EVP_PKEY_free (pkey);
+   X509_REQ_free (x509req);
+
+   return 1;
+}
+
+void
+_mongoc_basic_constraints_to_str (int flags, char *str)
+{
+   int l = 0;
+
+   if (flags & BASIC_CONSTRAINTS_CA_FALSE) {
+      l += sprintf (str + l, "CA:FALSE");
+   }
+   if (flags & BASIC_CONSTRAINTS_CA_TRUE) {
+      l += sprintf (str + l, "CA:TRUE");
+   }
+}
+void
+_mongoc_key_usage (int flags, char *str)
+{
+   int l = 0;
+
+   if (flags & KEY_USAGE_DIGITALSIGNATURE) {
+      l += sprintf (str + l, "digitalSignature");
+   }
+   if (flags & KEY_USAGE_NONREPUDIATION) {
+      l += sprintf (str + l, "nonRepudiation");
+   }
+   if (flags & KEY_USAGE_KEYENCIPHERMENT) {
+      l += sprintf (str + l, "keyEncipherment");
+   }
+   if (flags & KEY_USAGE_DATAENCIPHERMENT) {
+      l += sprintf (str + l, "dataEncipherment");
+   }
+   if (flags & KEY_USAGE_KEYAGREEMENT) {
+      l += sprintf (str + l, "keyAgreement");
+   }
+   if (flags & KEY_USAGE_KEYCERTSIGN) {
+      l += sprintf (str + l, "keyCertSign");
+   }
+   if (flags & KEY_USAGE_CRLSIGN) {
+      l += sprintf (str + l, "cRLSign");
+   }
+   if (flags & KEY_USAGE_ENCIPHERONLY) {
+      l += sprintf (str + l, "encipherOnly");
+   }
+   if (flags & KEY_USAGE_DECIPHERONLY) {
+      l += sprintf (str + l, "decipherOnly");
+   }
+}
+
+void
+_mongoc_ext_key_usage (int flags, char *str)
+{
+   int l = 0;
+
+   if (flags & EXT_KEY_USAGE_SERVERAUTH) {
+      l += sprintf (str + l, "serverAuth");
+   }
+   if (flags & EXT_KEY_USAGE_CLIENTAUTH) {
+      l += sprintf (str + l, "clientAuth");
+   }
+   if (flags & EXT_KEY_USAGE_CODESIGNING) {
+      l += sprintf (str + l, "codeSigning");
+   }
+   if (flags & EXT_KEY_USAGE_EMAILPROTECTION) {
+      l += sprintf (str + l, "emailProtection");
+   }
+   if (flags & EXT_KEY_USAGE_TIMESTAMPING) {
+      l += sprintf (str + l, "timeStamping");
+   }
+   if (flags & EXT_KEY_USAGE_MSCODEIND) {
+      l += sprintf (str + l, "msCodeInd");
+   }
+   if (flags & EXT_KEY_USAGE_MSCODECOM) {
+      l += sprintf (str + l, "msCodeCom");
+   }
+   if (flags & EXT_KEY_USAGE_MSCTLSIGN) {
+      l += sprintf (str + l, "msCTLSign");
+   }
+   if (flags & EXT_KEY_USAGE_MSSGC) {
+      l += sprintf (str + l, "msSGC");
+   }
+   if (flags & EXT_KEY_USAGE_MSEFS) {
+      l += sprintf (str + l, "msEFS");
+   }
+   if (flags & EXT_KEY_USAGE_NSSGC) {
+      l += sprintf (str + l, "nsSGC");
+   }
+}
+
+void
+_mongoc_x509_add_ext (X509 *x509gen, int type, char *value)
+{
+   X509_EXTENSION *ext = X509V3_EXT_conf_nid (NULL, NULL, type, value);
+   X509_add_ext (x509gen, ext, -1);
+}
+int
+_mongoc_sign_csr (const tls_options *settings)
+{
+   BIO *out = NULL;
+   BIO *x509bio = NULL;
+   BIO *cabio;
+   EVP_PKEY *capkey = NULL;
+   X509 *cax509;
+   X509 *x509gen;
+   X509_REQ *req = NULL;
+   EVP_PKEY *pktmp = NULL;
+   ASN1_INTEGER *serial = NULL;
+
+   cabio = BIO_new_file ("ca.pem", "r");
+   capkey = PEM_read_bio_PrivateKey (cabio, NULL, 0, NULL);
+   cax509 = PEM_read_bio_X509 (cabio, NULL, 0, NULL);
+   if (!capkey) {
+      fail ("Cannot create a user certificate: could not read private key from "
+            "sslCAFile");
+   }
+   BIO_free_all (cabio);
+   if (!X509_check_private_key (cax509, capkey)) {
+      fail ("Public/private keys in sslCAFile do not match");
+   }
+
+   // Read cert signing request
+   x509bio = BIO_new_file ("server-gen.csr.pem", "r");
+
+   req = PEM_read_bio_X509_REQ (x509bio, NULL, NULL, NULL);
+   BIO_free_all (x509bio);
+
+   x509gen = X509_new ();
+   X509_set_version (x509gen, 2);
+   serial = s2i_ASN1_INTEGER (NULL, (char *) "911112");
+   X509_set_serialNumber (x509gen, serial);
+   X509_set_issuer_name (x509gen, X509_get_subject_name (cax509));
+   X509_gmtime_adj (X509_get_notBefore (x509gen), 0);
+   X509_time_adj_ex (X509_get_notAfter (x509gen), 365, 0, NULL);
+   X509_set_subject_name (x509gen, X509_REQ_get_subject_name (req));
+
+   pktmp = X509_REQ_get_pubkey (req);
+   X509_set_pubkey (x509gen, pktmp);
+   EVP_PKEY_free (pktmp);
+
+
+   if (settings->san) {
+      _mongoc_x509_add_ext (x509gen, NID_subject_alt_name, settings->san);
+   }
+   if (settings->basic_constraints) {
+      char buf[1024];
+
+      _mongoc_basic_constraints_to_str (settings->basic_constraints,
+                                        (char *) &buf);
+      _mongoc_x509_add_ext (x509gen, NID_basic_constraints, (char *) buf);
+   }
+   if (settings->key_usage) {
+      char buf[1024];
+
+      _mongoc_key_usage (settings->key_usage, (char *) &buf);
+      _mongoc_x509_add_ext (x509gen, NID_key_usage, (char *) buf);
+   }
+   if (settings->ext_key_usage) {
+      char buf[1024];
+
+      _mongoc_ext_key_usage (settings->key_usage, (char *) &buf);
+      _mongoc_x509_add_ext (x509gen, NID_ext_key_usage, (char *) buf);
+   }
+   /*
+   ext = X509V3_EXT_conf_nid (
+      NULL,
+      NULL,
+      NID_key_usage,
+      (char *) "critical,nonRepudiation,digitalSignature,keyEncipherment");
+   X509_add_ext (x509gen, ext, -1);
+
+   ext = X509V3_EXT_conf_nid (
+      NULL, NULL, NID_ext_key_usage, (char *) "clientAuth");
+   X509_add_ext (x509gen, ext, -1);
+
+   */
+
+
+   X509_sign (x509gen, capkey, EVP_sha256 ());
+
+   ASN1_INTEGER_free (serial);
+
+   out = BIO_new_file ("server-gen.key.pem", "ab");
+   X509_print (NULL, x509gen);
+   if (!PEM_write_bio_X509 (out, x509gen)) {
+      fail ("couldn't write new cert");
+   }
+   BIO_free_all (out);
+
+   return 1;
+}
+
+int
+_mongoc_generate_certificate_for (tls_options *settings)
+{
+   _mongoc_generate_csr (settings);
+   _mongoc_sign_csr (settings);
+   settings->issuerfile = "ca.pem";
+   settings->keyfile = "server-gen.key.pem";
    return 1;
 }
 
@@ -142,28 +464,31 @@ _mongoc_ssl_make_ctx_for (const char *servername, const SSL_METHOD *method)
    _mongoc_decode_hostname (servername, settings);
 
 
-   if (!strcmp (servername, "localhost")) {
-      ssl_ctx = SSL_CTX_new (method);
-      // if (!SSL_CTX_set_cipher_list (ssl_ctx, "EXPORT")) {
-      if (!SSL_CTX_set_cipher_list (ssl_ctx, "HIGH:!EXPORT:!aNULL@STRENGTH")) {
-         SSL_CTX_free (ssl_ctx);
-         return NULL;
-      }
-
-      if (!_mongoc_ssl_setup_ca (ssl_ctx, CERT_CA, NULL)) {
-         SSL_CTX_free (ssl_ctx);
-         return NULL;
-      }
-
-      if (!_mongoc_ssl_setup_pem_file (ssl_ctx, CERT_GOOD_SERVER)) {
-         SSL_CTX_free (ssl_ctx);
-         return NULL;
-      }
-
-      fprintf (stderr, "Certificated prepped and good to go!\n");
-      return ssl_ctx;
+   ssl_ctx = SSL_CTX_new (method);
+   if (!SSL_CTX_set_cipher_list (ssl_ctx, settings->ciphers)) {
+      goto fail;
    }
 
+   if (!settings->keyfile) {
+      _mongoc_generate_certificate_for (settings);
+   }
+   if (!strcmp (settings->keyfile, CERT_GOOD_SERVER)) {
+      if (!_mongoc_ssl_setup_certs (ssl_ctx, CERT_CA, CERT_GOOD_SERVER)) {
+         goto fail;
+      }
+   } else {
+      if (!_mongoc_ssl_setup_certs (
+             ssl_ctx, settings->issuerfile, settings->keyfile)) {
+         goto fail;
+      }
+   }
+
+   fprintf (stderr, "Certificated prepped and good to go!\n");
+   return ssl_ctx;
+
+fail:
+   SSL_CTX_free (ssl_ctx);
+   free (settings);
    return NULL;
 }
 static int
