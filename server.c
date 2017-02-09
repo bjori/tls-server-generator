@@ -152,7 +152,7 @@ _mongoc_decode_hostname (const char *servername, tls_options *settings)
 
    settings->ciphers = "HIGH:!EXPORT:!aNULL@STRENGTH";
    settings->cn = (char *) servername;
-   settings->san = (char *) "DNS:localhost,IP:192.168.0.1";
+   settings->san = (char *) "DNS:some.server.pass.vcap.me,IP:192.168.0.1";
    settings->issuer = "root";   // Signing CA: root, intermediate, unknown
    settings->not_before = 2016; // Not valid before datetime
    settings->not_after = 2017;  // Not valid after datetime
@@ -397,6 +397,7 @@ _mongoc_sign_csr (const tls_options *settings)
    if (settings->san) {
       _mongoc_x509_add_ext (x509gen, NID_subject_alt_name, settings->san);
    }
+
    if (settings->basic_constraints) {
       char buf[1024];
 
@@ -404,32 +405,20 @@ _mongoc_sign_csr (const tls_options *settings)
                                         (char *) &buf);
       _mongoc_x509_add_ext (x509gen, NID_basic_constraints, (char *) buf);
    }
+
    if (settings->key_usage) {
       char buf[1024];
 
       _mongoc_key_usage (settings->key_usage, (char *) &buf);
       _mongoc_x509_add_ext (x509gen, NID_key_usage, (char *) buf);
    }
+
    if (settings->ext_key_usage) {
       char buf[1024];
 
       _mongoc_ext_key_usage (settings->key_usage, (char *) &buf);
       _mongoc_x509_add_ext (x509gen, NID_ext_key_usage, (char *) buf);
    }
-   /*
-   ext = X509V3_EXT_conf_nid (
-      NULL,
-      NULL,
-      NID_key_usage,
-      (char *) "critical,nonRepudiation,digitalSignature,keyEncipherment");
-   X509_add_ext (x509gen, ext, -1);
-
-   ext = X509V3_EXT_conf_nid (
-      NULL, NULL, NID_ext_key_usage, (char *) "clientAuth");
-   X509_add_ext (x509gen, ext, -1);
-
-   */
-
 
    X509_sign (x509gen, capkey, EVP_sha256 ());
 

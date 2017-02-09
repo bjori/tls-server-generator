@@ -13,11 +13,11 @@ run_test() {
 }
 
 PASS="
-mongodb://localhost:8888/?ssl=true&sslCertificateAuthorityFile=$ROOT/tests/x509gen/ca.pem
+mongodb://some.server.pass.vcap.me:8888/?ssl=true&sslCertificateAuthorityFile=$ROOT/tests/x509gen/ca.pem
 ";
 
 FAIL="
-mongodb://foo.sni:8888/?ssl=true&sslCertificateAuthorityFile=$ROOT/tests/x509gen/ca.pem
+mongodb://some.server.fail.vcap.me:8888/?ssl=true&sslCertificateAuthorityFile=$ROOT/tests/x509gen/ca.pem
 ";
 
 echo "----------------------- SHOULD SUCCEED -----------------------"
