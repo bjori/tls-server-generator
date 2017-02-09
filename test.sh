@@ -15,7 +15,7 @@ run_test() {
 run_config_test() {
    config_file=$1
    # Convert into base32 and split into 63 character labels.
-   encoded=$(base32 ${config_file} | tr -d '\n' | sed -E 's/(.{64})/\1./g')
+   encoded=$(base32 ${config_file} | tr -d '\n' | sed -E 's/(.{63})/\1./g')
    encoded_host="${encoded}.vcap.me"
    run_test "mongodb://${encoded_host}:8888/?ssl=true&sslCertificateAuthorityFile=$ROOT/tests/x509gen/ca.pem"
 }
