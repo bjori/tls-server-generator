@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <sys/types.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <unistd.h>
@@ -53,6 +54,9 @@
 
 #define TOP_LEVEL_DOMAIN ".vcap.me"
 
+#ifndef __CONST_SOCKADDR_ARG
+typedef const struct sockaddr *__CONST_SOCKADDR_ARG;
+#endif
 
 /* bind/connect declaration used as callback */
 typedef int (*cb) (int fd, __CONST_SOCKADDR_ARG, socklen_t addrlen);
@@ -248,8 +252,10 @@ _config_to_hostname (const char *config)
    int config_len = strlen (config);
    char b64_hostname[MAX_B64_SIZE] = {0};
 
-   int b64_len =
-      mongoc_b64_ntop (config, config_len, b64_hostname, sizeof (b64_hostname));
+   int b64_len = mongoc_b64_ntop ((const uint8_t *) config,
+                                  config_len,
+                                  b64_hostname,
+                                  sizeof (b64_hostname));
    if (-1 == b64_len) {
       return NULL;
    }
@@ -266,7 +272,8 @@ _hostname_to_config (const char *hostname)
    char *tls_config = calloc (MAX_CONFIG_SIZE, 1);
    int tls_config_len;
 
-   tls_config_len = mongoc_b64_pton (b64_hostname, tls_config, MAX_CONFIG_SIZE);
+   tls_config_len = mongoc_b64_pton (
+      (const char *) b64_hostname, (uint8_t *) tls_config, MAX_CONFIG_SIZE);
    free (b64_hostname);
    if (-1 == tls_config_len) {
       free (tls_config);
