@@ -98,7 +98,6 @@ typedef struct _tls_options {
 void
 _free_tls_options (tls_options *options)
 {
-
    if (options->ciphers) {
       free (options->ciphers);
    }
@@ -312,12 +311,13 @@ _mongoc_decode_hostname (const char *servername, tls_options *settings)
    }
    free (tls_config);
 
-   settings->ciphers = strdup("HIGH:!EXPORT:!aNULL@STRENGTH");
-   settings->cn = strdup(servername);
-   settings->san = strdup("DNS:some.server.pass.vcap.me,IP:192.168.0.1");
-   settings->issuer = strdup("root");   // Signing CA: root, intermediate, unknown
-   settings->not_before = time(NULL);
-   settings->not_after = time(NULL) + (7 * 24 * 60 * 60);
+   settings->ciphers = strdup ("HIGH:!EXPORT:!aNULL@STRENGTH");
+   settings->cn = strdup (servername);
+   settings->san = strdup ("DNS:some.server.pass.vcap.me,IP:192.168.0.1");
+   settings->issuer =
+      strdup ("root"); // Signing CA: root, intermediate, unknown
+   settings->not_before = time (NULL);
+   settings->not_after = time (NULL) + (7 * 24 * 60 * 60);
 
    settings->basic_constraints = BASIC_CONSTRAINTS_CA_FALSE;
    settings->key_usage = KEY_USAGE_DIGITALSIGNATURE;
@@ -409,9 +409,9 @@ _mongoc_generate_csr (const char *servername, const tls_options *settings)
    }
 
    BIO_free_all (out);
-   path[pathlen-8] = 'c';
-   path[pathlen-7] = 's';
-   path[pathlen-6] = 'r';
+   path[pathlen - 8] = 'c';
+   path[pathlen - 7] = 's';
+   path[pathlen - 6] = 'r';
 
    out = BIO_new_file (path, "wb");
    if (!PEM_write_bio_X509_REQ_NEW (out, x509req)) {
@@ -560,13 +560,14 @@ _mongoc_sign_csr (const char *servername, const tls_options *settings)
    X509_set_issuer_name (x509gen, X509_get_subject_name (cax509));
 
    if (settings->not_before) {
-      ASN1_TIME_set (X509_get_notBefore (x509gen), (time_t)settings->not_before);
+      ASN1_TIME_set (X509_get_notBefore (x509gen),
+                     (time_t) settings->not_before);
    } else {
       X509_gmtime_adj (X509_get_notBefore (x509gen), 0);
    }
 
    if (settings->not_after) {
-      ASN1_TIME_set (X509_get_notAfter (x509gen), (time_t)settings->not_after);
+      ASN1_TIME_set (X509_get_notAfter (x509gen), (time_t) settings->not_after);
    } else {
       X509_time_adj_ex (X509_get_notAfter (x509gen), 365, 0, NULL);
    }
@@ -608,9 +609,9 @@ _mongoc_sign_csr (const char *servername, const tls_options *settings)
 
    ASN1_INTEGER_free (serial);
 
-   path[pathlen-8] = 'k';
-   path[pathlen-7] = 'e';
-   path[pathlen-6] = 'y';
+   path[pathlen - 8] = 'k';
+   path[pathlen - 7] = 'e';
+   path[pathlen - 6] = 'y';
 
    out = BIO_new_file (path, "ab");
    X509_print (NULL, x509gen);
@@ -668,7 +669,7 @@ _mongoc_ssl_make_ctx_for (const char *servername, const SSL_METHOD *method)
    }
 
    fprintf (stderr, "Certificated prepped and good to go!\n");
-   _free_tls_options  (settings);
+   _free_tls_options (settings);
    return ssl_ctx;
 
 fail:
@@ -809,7 +810,7 @@ _read_write (int polled, SSL *ssl, int fd_ssl, int fd_plain)
 void *
 worker (void *arg)
 {
-   worker_config cfg = *(worker_config *)arg;
+   worker_config cfg = *(worker_config *) arg;
    int fd_server;
    int n;
    int success;
@@ -872,14 +873,14 @@ main (int argc, char *argv[])
       return 1;
    }
 
-   sd = _socket (atoi(argv[1]), bind);
+   sd = _socket (atoi (argv[1]), bind);
    if (!sd) {
       perror ("bind failed");
       return 1;
    }
-   cfg->server_port = atoi(argv[2]);
+   cfg->server_port = atoi (argv[2]);
 
-   fprintf (stderr, "Daemon listening to %d\n", atoi(argv[1]));
+   fprintf (stderr, "Daemon listening to %d\n", atoi (argv[1]));
    fprintf (stderr, "The server will be listening to %d\n", cfg->server_port);
    listen (sd, 42);
 
