@@ -316,8 +316,8 @@ _mongoc_decode_hostname (const char *servername, tls_options *settings)
    settings->cn = strdup(servername);
    settings->san = strdup("DNS:some.server.pass.vcap.me,IP:192.168.0.1");
    settings->issuer = strdup("root");   // Signing CA: root, intermediate, unknown
-   settings->not_before = 2016; // Not valid before datetime
-   settings->not_after = 2017;  // Not valid after datetime
+   settings->not_before = time(NULL);
+   settings->not_after = time(NULL) + (7 * 24 * 60 * 60);
 
    settings->basic_constraints = BASIC_CONSTRAINTS_CA_FALSE;
    settings->key_usage = KEY_USAGE_DIGITALSIGNATURE;
@@ -558,8 +558,19 @@ _mongoc_sign_csr (const char *servername, const tls_options *settings)
    serial = s2i_ASN1_INTEGER (NULL, (char *) "911112");
    X509_set_serialNumber (x509gen, serial);
    X509_set_issuer_name (x509gen, X509_get_subject_name (cax509));
-   X509_gmtime_adj (X509_get_notBefore (x509gen), 0);
-   X509_time_adj_ex (X509_get_notAfter (x509gen), 365, 0, NULL);
+
+   if (settings->not_before) {
+      ASN1_TIME_set (X509_get_notBefore (x509gen), (time_t)settings->not_before);
+   } else {
+      X509_gmtime_adj (X509_get_notBefore (x509gen), 0);
+   }
+
+   if (settings->not_after) {
+      ASN1_TIME_set (X509_get_notAfter (x509gen), (time_t)settings->not_after);
+   } else {
+      X509_time_adj_ex (X509_get_notAfter (x509gen), 365, 0, NULL);
+   }
+
    X509_set_subject_name (x509gen, X509_REQ_get_subject_name (req));
 
    pktmp = X509_REQ_get_pubkey (req);
