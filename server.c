@@ -6,6 +6,7 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <unistd.h>
+#include <inttypes.h>
 
 #include <pthread.h>
 #include <poll.h>
@@ -86,10 +87,10 @@ typedef struct _tls_options {
    char *issuerfile;
 
    // Certificate Generation Options
-   char *cn;           // CN: Common Name
-   char *issuer;       // Signing CA: root, intermediate, unknown
-   int64_t not_before; // Not valid before datetime
-   int64_t not_after;  // Not valid after datetime
+   char *cn;          // CN: Common Name
+   char *issuer;      // Signing CA: root, intermediate, unknown
+   time_t not_before; // Not valid before time
+   time_t not_after;  // Not valid after time
    char *san; // SAN: Subject Alt Names, list of IP Addresses or DNS names, eg
               // "IP:127.0.0.1,DNS:server"
 
@@ -309,9 +310,51 @@ _mongoc_decode_hostname (const char *servername, tls_options *settings)
          *value = '\0';
          value++;
       }
-      if (strcmp (key, "A") == 0) {
-      } else if (strcmp (key, "B") == 0) {
-      } else if (strcmp (key, "C") == 0) {
+      if (strcmp (key, "C") == 0) {
+         // C = ciphers, string.
+         settings->ciphers = strdup (value);
+      } else if (strcmp (key, "TV") == 0) {
+         // TV = Acceptable TLS_VERSION_* versions, string int.
+         settings->tls_versions = atoi (value);
+      } else if (strcmp (key, "TC") == 0) {
+         // TC = Enable TLS compression, value is optional
+         settings->tls_compression = 1;
+      } else if (strcmp (key, "KF") == 0) {
+         // KF = Use hard coded server PEM file, string.
+         settings->keyfile = strdup (value);
+      } else if (strcmp (key, "CA") == 0) {
+         // CA = Use hard coded server CA file, string.
+         settings->issuerfile = strdup (value);
+         settings->issuer = strdup (value);
+      } else if (strcmp (key, "CN") == 0) {
+         // CN = Common Name, string.
+         settings->cn = strdup (value);
+      } else if (strcmp (key, "NB") == 0) {
+         // NB = Not valid before datetime, string YYYY-[M]M-[D]D.
+         struct tm tm;
+         char *rv = strptime (value, "%Y-%m-%d", &tm);
+         if (rv) {
+            settings->not_before = mktime (&tm);
+         }
+      } else if (strcmp (key, "NA") == 0) {
+         // NA = Not valid after datetime, string YYYY-[M]M-[D]D.
+         struct tm tm;
+         char *rv = strptime (value, "%Y-%m-%d", &tm);
+         if (rv) {
+            settings->not_after = mktime (&tm);
+         }
+      } else if (strcmp (key, "SAN") == 0) {
+         // SAN = ubject Alt Names, string.
+         settings->san = strdup (value);
+      } else if (strcmp (key, "BC") == 0) {
+         // BC = Basic Constraints, string int.
+         settings->basic_constraints = atoi (value);
+      } else if (strcmp (key, "KU") == 0) {
+         // KU = Key Usage, string int.
+         settings->key_usage = atoi (value);
+      } else if (strcmp (key, "EKU") == 0) {
+         // EKU = Extended Key Usage, string int.
+         settings->ext_key_usage = atoi (value);
       } else {
          // Unknown key..
       }
@@ -320,20 +363,7 @@ _mongoc_decode_hostname (const char *servername, tls_options *settings)
 
    settings->tls_versions = TLS_VERSION_TLSv12;
    settings->tls_compression = 0;
-   settings->ciphers = strdup ("HIGH:!EXPORT:!aNULL@STRENGTH");
    settings->cn = strdup (servername);
-   settings->san = strdup ("DNS:some.server.pass.vcap.me,IP:192.168.0.1");
-   settings->issuer =
-      strdup ("root"); // Signing CA: root, intermediate, unknown
-   settings->not_before = time (NULL);
-   settings->not_after = time (NULL) + (7 * 24 * 60 * 60);
-
-   settings->basic_constraints = BASIC_CONSTRAINTS_CA_FALSE;
-   settings->key_usage = KEY_USAGE_DIGITALSIGNATURE;
-   settings->ext_key_usage = EXT_KEY_USAGE_SERVERAUTH |
-                             EXT_KEY_USAGE_CLIENTAUTH |
-                             EXT_KEY_USAGE_CODESIGNING;
-
    return 1;
 }
 
@@ -906,6 +936,51 @@ fail:
 }
 
 int
+test_hostname_conversion (char *config)
+{
+   printf ("Hostname config:\n%s\n", config);
+   char *hostname = _config_to_hostname (config);
+   if (hostname == NULL) {
+      return 1;
+   }
+   printf ("encoded hostname: %s\n", hostname);
+   char *decoded_config = _hostname_to_config (hostname);
+   free (hostname);
+   if (hostname == NULL) {
+      return 1;
+   }
+   printf ("decoded config:\n%s\n", decoded_config);
+   free (decoded_config);
+   if (strcmp (config, decoded_config) != 0) {
+      fprintf (stderr, "FAILED: configs do not match!\n");
+      return 1;
+   }
+   return 0;
+}
+
+int
+run_hostname_tests ()
+{
+   int num_failed = 0;
+   char *config = "A=1\n"
+                  "B=2\n"
+                  "C=3\n"
+                  "D=4";
+   num_failed += test_hostname_conversion (config);
+   config = "C=HIGH:!EXPORT:!aNULL@STRENGTH\n"
+            "CA=root\n"
+            "NB=2017-2-1\n"
+            "NA=2018-2-1\n"
+            "SAN=DNS:some.server.pass.vcap.me,IP:192.168.0.1\n"
+            "BC=2\n"
+            "KU=1\n"
+            "EKU=7\n";
+   num_failed += test_hostname_conversion (config);
+   return num_failed;
+}
+
+
+int
 main (int argc, char *argv[])
 {
    int sd;
@@ -913,6 +988,9 @@ main (int argc, char *argv[])
    int success;
    worker_config *cfg = calloc (sizeof *cfg, 1);
 
+   if (argc == 2 && strcmp (argv[1], "test") == 0) {
+      return run_hostname_tests ();
+   }
 
    if (argc != 3) {
       fprintf (stderr, "usage: %s MY-PORT SERVER-PORT\n", argv[0]);
