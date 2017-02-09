@@ -2,7 +2,8 @@ C=HIGH:!EXPORT:!aNULL@STRENGTH
 CA=root
 NB=2017-2-1
 NA=2018-2-1
-SAN=DNS:some.server.pass.vcap.me,IP:192.168.0.1
+SAN=IP:127.0.0.1
+AS
 BC=2
 KU=1
 EKU=7

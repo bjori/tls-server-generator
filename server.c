@@ -273,6 +273,7 @@ _mongoc_decode_hostname (const char *servername, tls_options *settings)
 
    char *sep = "\n";
    char *line, *key, *value, *last;
+   int add_san = 0;
    for (line = strtok_r (tls_config, sep, &last); line;
         line = strtok_r (NULL, sep, &last)) {
       key = line;
@@ -302,14 +303,14 @@ _mongoc_decode_hostname (const char *servername, tls_options *settings)
          settings->cn = strdup (value);
       } else if (strcmp (key, "NB") == 0) {
          // NB = Not valid before datetime, string YYYY-[M]M-[D]D.
-         struct tm tm;
+         struct tm tm = {0};
          char *rv = strptime (value, "%Y-%m-%d", &tm);
          if (rv) {
             settings->not_before = mktime (&tm);
          }
       } else if (strcmp (key, "NA") == 0) {
          // NA = Not valid after datetime, string YYYY-[M]M-[D]D.
-         struct tm tm;
+         struct tm tm = {0};
          char *rv = strptime (value, "%Y-%m-%d", &tm);
          if (rv) {
             settings->not_after = mktime (&tm);
@@ -317,6 +318,9 @@ _mongoc_decode_hostname (const char *servername, tls_options *settings)
       } else if (strcmp (key, "SAN") == 0) {
          // SAN = ubject Alt Names, string.
          settings->san = strdup (value);
+      } else if (strcmp (key, "AS") == 0) {
+         // AS = Add hostname to SAN.
+         add_san = 1;
       } else if (strcmp (key, "BC") == 0) {
          // BC = Basic Constraints, string int.
          settings->basic_constraints = atoi (value);
@@ -328,6 +332,21 @@ _mongoc_decode_hostname (const char *servername, tls_options *settings)
          settings->ext_key_usage = atoi (value);
       } else {
          // Unknown key..
+      }
+   }
+
+   if (add_san) {
+      if (settings->san) {
+         int size =
+            strlen (settings->san) + strlen (",DNS:") + strlen (servername) + 1;
+         char *new_san = calloc (size, 1);
+         snprintf (new_san, size, "%s,DNS:%s", settings->san, servername);
+         free (settings->san);
+         settings->san = new_san;
+      } else {
+         int size = strlen ("DNS:") + strlen (servername) + 1;
+         settings->san = calloc (size, 1);
+         snprintf (settings->san, size, "DNS:%s", servername);
       }
    }
    free (tls_config);
@@ -942,7 +961,8 @@ run_hostname_tests ()
             "CA=root\n"
             "NB=2017-2-1\n"
             "NA=2018-2-1\n"
-            "SAN=DNS:some.server.pass.vcap.me,IP:192.168.0.1\n"
+            "SAN=IP:127.0.0.1\n"
+            "AS\n"
             "BC=2\n"
             "KU=1\n"
             "EKU=7\n";
