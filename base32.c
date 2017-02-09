@@ -84,7 +84,7 @@ int base32_encode(const uint8_t *data, int length, uint8_t *result,
       }
       int index = 0x1F & (buffer >> (bitsLeft - 5));
       bitsLeft -= 5;
-      result[count++] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"[index];
+      result[count++] = "abcdefghijklmnopqrstuvwxyz234567"[index];
     }
   }
   if (count < bufSize) {
