@@ -49,6 +49,13 @@
 #define EXT_KEY_USAGE_MSEFS 1 << 9
 #define EXT_KEY_USAGE_NSSGC 1 << 10
 
+#define TLS_VERSION_SSLv2 1 << 0
+#define TLS_VERSION_SSLv3 1 << 1
+#define TLS_VERSION_TLSv10 1 << 2
+#define TLS_VERSION_TLSv11 1 << 3
+#define TLS_VERSION_TLSv12 1 << 4
+#define TLS_VERSION_TLSv13 1 << 5
+
 #define MAX_B64_SIZE 1024
 #define MAX_CONFIG_SIZE MAX_B64_SIZE
 
@@ -311,6 +318,8 @@ _mongoc_decode_hostname (const char *servername, tls_options *settings)
    }
    free (tls_config);
 
+   settings->tls_versions = TLS_VERSION_TLSv12;
+   settings->tls_compression = 0;
    settings->ciphers = strdup ("HIGH:!EXPORT:!aNULL@STRENGTH");
    settings->cn = strdup (servername);
    settings->san = strdup ("DNS:some.server.pass.vcap.me,IP:192.168.0.1");
@@ -643,6 +652,7 @@ _mongoc_generate_certificate_for (const char *servername, tls_options *settings)
 SSL_CTX *
 _mongoc_ssl_make_ctx_for (const char *servername, const SSL_METHOD *method)
 {
+   int options;
    SSL_CTX *ssl_ctx;
    tls_options *settings = calloc (sizeof *settings, 1);
 
@@ -650,6 +660,40 @@ _mongoc_ssl_make_ctx_for (const char *servername, const SSL_METHOD *method)
 
 
    ssl_ctx = SSL_CTX_new (method);
+
+   // So we know we did get SNI
+   SSL_CTX_set_app_data (ssl_ctx, (void *) 1);
+
+   SSL_CTX_clear_options (ssl_ctx, SSL_CTX_get_options (ssl_ctx));
+
+   options = SSL_OP_ALL | SSL_OP_SINGLE_DH_USE;
+   if (settings->tls_compression) {
+      /* FIXME: It may be non-trivial to actually *enable* compression.. */
+   } else {
+      options |= SSL_OP_NO_COMPRESSION;
+   }
+
+   if (settings->tls_versions) {
+      options |= SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_TLSv1 |
+                 SSL_OP_NO_TLSv1_1 | SSL_OP_NO_TLSv1_2;
+      if (settings->tls_versions & TLS_VERSION_SSLv2) {
+         options ^= SSL_OP_NO_SSLv2;
+      }
+      if (settings->tls_versions & TLS_VERSION_SSLv3) {
+         options ^= SSL_OP_NO_SSLv3;
+      }
+      if (settings->tls_versions & TLS_VERSION_TLSv10) {
+         options ^= SSL_OP_NO_TLSv1;
+      }
+      if (settings->tls_versions & TLS_VERSION_TLSv11) {
+         options ^= SSL_OP_NO_TLSv1_1;
+      }
+      if (settings->tls_versions & TLS_VERSION_TLSv12) {
+         options ^= SSL_OP_NO_TLSv1_2;
+      }
+   }
+
+   SSL_CTX_set_options (ssl_ctx, options);
    if (!SSL_CTX_set_cipher_list (ssl_ctx, settings->ciphers)) {
       goto fail;
    }
@@ -677,6 +721,7 @@ fail:
    free (settings);
    return NULL;
 }
+
 static int
 _mongoc_ssl_servername_callback (SSL *ssl, int *ad, void *arg)
 {
@@ -703,6 +748,7 @@ _mongoc_ssl_servername_callback (SSL *ssl, int *ad, void *arg)
 
    return SSL_TLSEXT_ERR_NOACK;
 }
+
 SSL_CTX *
 mongoc_ssl_ctx_new ()
 {
@@ -721,13 +767,7 @@ mongoc_ssl_ctx_new ()
    if (!ssl_ctx) {
       return NULL;
    }
-   options = SSL_OP_ALL | SSL_OP_NO_COMPRESSION | SSL_OP_SINGLE_DH_USE;
-
-#if OPENSSL_VERSION_NUMBER >= 0x1010000fL
-   SSL_CTX_set_min_proto_version (ssl_ctx, SSL3_VERSION);
-#else
-   options |= SSL_OP_NO_SSLv2;
-#endif
+   options = SSL_OP_ALL;
 
    SSL_CTX_set_options (ssl_ctx, options);
 
@@ -832,6 +872,12 @@ worker (void *arg)
       /* should the test suite determine if it failed or not? */
       fprintf (stderr, "Handhsake failed\n");
       goto fail;
+   }
+
+   // We did not get SNI
+   if (!SSL_CTX_get_app_data (SSL_get_SSL_CTX (ssl))) {
+      fprintf (stderr,
+               "WARNING: SNI callback not invoked.. Maybe speaking SSL!\n");
    }
 
    fds[0].fd = cfg.fd_client;
