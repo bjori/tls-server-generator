@@ -248,8 +248,8 @@ _config_to_hostname (const char *config)
    int config_len = strlen (config);
    char b64_hostname[MAX_B64_SIZE] = {0};
 
-   int b64_len = mongoc_b64_ntop (
-      config, sizeof (config_len), b64_hostname, sizeof (b64_hostname));
+   int b64_len =
+      mongoc_b64_ntop (config, config_len, b64_hostname, sizeof (b64_hostname));
    if (-1 == b64_len) {
       return NULL;
    }
