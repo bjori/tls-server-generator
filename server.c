@@ -86,12 +86,8 @@ typedef struct _tls_options {
 } tls_options;
 
 void
-_free_tls_options (tls_options **options_ptr)
+_free_tls_options (tls_options *options)
 {
-   if (options_ptr == NULL || *options_ptr == NULL) {
-      return;
-   }
-   tls_options *options = *options_ptr;
 
    if (options->ciphers) {
       free (options->ciphers);
@@ -109,7 +105,6 @@ _free_tls_options (tls_options **options_ptr)
       free (options->san);
    }
    free (options);
-   *options_ptr = NULL;
 }
 
 void
@@ -160,10 +155,10 @@ _mongoc_decode_hostname (const char *servername, tls_options *settings)
       return 0;
    }
 
-   settings->ciphers = "HIGH:!EXPORT:!aNULL@STRENGTH";
-   settings->cn = (char *) servername;
-   settings->san = (char *) "DNS:some.server.pass.vcap.me,IP:192.168.0.1";
-   settings->issuer = "root";   // Signing CA: root, intermediate, unknown
+   settings->ciphers = strdup("HIGH:!EXPORT:!aNULL@STRENGTH");
+   settings->cn = strdup(servername);
+   settings->san = strdup("DNS:some.server.pass.vcap.me,IP:192.168.0.1");
+   settings->issuer = strdup("root");   // Signing CA: root, intermediate, unknown
    settings->not_before = 2016; // Not valid before datetime
    settings->not_after = 2017;  // Not valid after datetime
 
@@ -198,13 +193,17 @@ fail (const char *msg)
 }
 
 int
-_mongoc_generate_csr (const tls_options *settings)
+_mongoc_generate_csr (const char *servername, const tls_options *settings)
 {
    RSA *rsa;
    EVP_PKEY *pkey;
    X509_REQ *x509req;
    X509_NAME *name;
    BIO *out;
+   int pathlen = strlen (servername) + strlen ("certs/.key.pem") + 1;
+   char *path = malloc (pathlen);
+
+   snprintf (path, pathlen, "certs/%s.key.pem", servername);
 
    pkey = EVP_PKEY_new ();
    if (!pkey) {
@@ -247,15 +246,17 @@ _mongoc_generate_csr (const tls_options *settings)
       fail ("req_sign");
    }
 
-   out = BIO_new_file ("server-gen.key.pem", "wb");
-   // out = BIO_new(BIO_s_mem());
+   out = BIO_new_file (path, "wb");
    if (!PEM_write_bio_PrivateKey (out, pkey, NULL, NULL, 0, NULL, NULL)) {
       fail ("can't write private key");
    }
 
    BIO_free_all (out);
-   // out = BIO_new(BIO_s_mem());
-   out = BIO_new_file ("server-gen.csr.pem", "wb");
+   path[pathlen-8] = 'c';
+   path[pathlen-7] = 's';
+   path[pathlen-6] = 'r';
+
+   out = BIO_new_file (path, "wb");
    if (!PEM_write_bio_X509_REQ_NEW (out, x509req)) {
       fail ("coudln't write csr");
    }
@@ -263,6 +264,7 @@ _mongoc_generate_csr (const tls_options *settings)
 
    EVP_PKEY_free (pkey);
    X509_REQ_free (x509req);
+   free (path);
 
    return 1;
 }
@@ -360,7 +362,7 @@ _mongoc_x509_add_ext (X509 *x509gen, int type, char *value)
    X509_add_ext (x509gen, ext, -1);
 }
 int
-_mongoc_sign_csr (const tls_options *settings)
+_mongoc_sign_csr (const char *servername, const tls_options *settings)
 {
    BIO *out = NULL;
    BIO *x509bio = NULL;
@@ -371,6 +373,10 @@ _mongoc_sign_csr (const tls_options *settings)
    X509_REQ *req = NULL;
    EVP_PKEY *pktmp = NULL;
    ASN1_INTEGER *serial = NULL;
+   int pathlen = strlen (servername) + strlen ("certs/.key.pem") + 1;
+   char *path = malloc (pathlen);
+
+   snprintf (path, pathlen, "certs/%s.csr.pem", servername);
 
    cabio = BIO_new_file ("ca.pem", "r");
    capkey = PEM_read_bio_PrivateKey (cabio, NULL, 0, NULL);
@@ -385,7 +391,7 @@ _mongoc_sign_csr (const tls_options *settings)
    }
 
    // Read cert signing request
-   x509bio = BIO_new_file ("server-gen.csr.pem", "r");
+   x509bio = BIO_new_file (path, "r");
 
    req = PEM_read_bio_X509_REQ (x509bio, NULL, NULL, NULL);
    BIO_free_all (x509bio);
@@ -434,23 +440,34 @@ _mongoc_sign_csr (const tls_options *settings)
 
    ASN1_INTEGER_free (serial);
 
-   out = BIO_new_file ("server-gen.key.pem", "ab");
+   path[pathlen-8] = 'k';
+   path[pathlen-7] = 'e';
+   path[pathlen-6] = 'y';
+
+   out = BIO_new_file (path, "ab");
    X509_print (NULL, x509gen);
    if (!PEM_write_bio_X509 (out, x509gen)) {
       fail ("couldn't write new cert");
    }
    BIO_free_all (out);
+   free (path);
 
    return 1;
 }
 
 int
-_mongoc_generate_certificate_for (tls_options *settings)
+_mongoc_generate_certificate_for (const char *servername, tls_options *settings)
 {
-   _mongoc_generate_csr (settings);
-   _mongoc_sign_csr (settings);
+   int pathlen = strlen (servername) + strlen ("certs/.key.pem") + 1;
+   char *path = malloc (pathlen);
+
+   snprintf (path, pathlen, "certs/%s.key.pem", servername);
+
+   _mongoc_generate_csr (servername, settings);
+   _mongoc_sign_csr (servername, settings);
    settings->issuerfile = "ca.pem";
-   settings->keyfile = "server-gen.key.pem";
+   settings->keyfile = path;
+
    return 1;
 }
 
@@ -469,7 +486,7 @@ _mongoc_ssl_make_ctx_for (const char *servername, const SSL_METHOD *method)
    }
 
    if (!settings->keyfile) {
-      _mongoc_generate_certificate_for (settings);
+      _mongoc_generate_certificate_for (servername, settings);
    }
    if (!strcmp (settings->keyfile, CERT_GOOD_SERVER)) {
       if (!_mongoc_ssl_setup_certs (ssl_ctx, CERT_CA, CERT_GOOD_SERVER)) {
@@ -483,6 +500,7 @@ _mongoc_ssl_make_ctx_for (const char *servername, const SSL_METHOD *method)
    }
 
    fprintf (stderr, "Certificated prepped and good to go!\n");
+   _free_tls_options  (settings);
    return ssl_ctx;
 
 fail:
