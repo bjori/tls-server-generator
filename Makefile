@@ -14,7 +14,7 @@ test: app
 	$(SUPPRESS) PING=${PING} sh test.sh
 
 debug: app
-	$(SUPPRESS) gdb --args app
+	$(SUPPRESS) gdb --args app 8888 27017
 
 .PHONY: app test
 

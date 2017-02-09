@@ -48,6 +48,16 @@
 #define EXT_KEY_USAGE_NSSGC 1 << 10
 
 
+/* bind/connect declaration used as callback */
+typedef int (*cb) (int fd, __CONST_SOCKADDR_ARG, socklen_t addrlen);
+
+/* Arguments to our thread */
+typedef struct _worker_config {
+   int fd_client;
+   int server_port;
+} worker_config;
+
+
 // Holds all the TLS options configurable through the hostname.
 typedef struct _tls_options {
    // TLS Options
@@ -569,8 +579,6 @@ mongoc_stream_ssl_wrap (int fd)
    return ssl;
 }
 
-typedef int (*cb) (int fd, __CONST_SOCKADDR_ARG, socklen_t addrlen);
-
 int
 _socket (int port, cb func)
 {
@@ -615,23 +623,23 @@ _read_write (int polled, SSL *ssl, int fd_ssl, int fd_plain)
 void *
 worker (void *arg)
 {
-   int fd_client = *(int *) arg;
-   int fd_mongo;
+   worker_config cfg = *(worker_config *)arg;
+   int fd_server;
    int n;
    int success;
    int sockets = 2;
    struct pollfd fds[sockets];
    SSL *ssl;
 
-   fd_mongo = _socket (27017, connect);
-   if (!fd_mongo) {
+   fd_server = _socket (27017, connect);
+   if (!fd_server) {
       perror ("connect failed");
       return (void *) 1;
    }
 
    _init_openssl ();
 
-   ssl = mongoc_stream_ssl_wrap (fd_client);
+   ssl = mongoc_stream_ssl_wrap (cfg.fd_client);
    int ret = SSL_do_handshake (ssl);
    if (ret < 1) {
       /* should the test suite determine if it failed or not? */
@@ -639,9 +647,9 @@ worker (void *arg)
       goto fail;
    }
 
-   fds[0].fd = fd_client;
+   fds[0].fd = cfg.fd_client;
    fds[0].events = POLLIN;
-   fds[1].fd = fd_mongo;
+   fds[1].fd = fd_server;
    fds[1].events = POLLIN;
 
    do {
@@ -649,7 +657,7 @@ worker (void *arg)
 
       for (n = 0; n < sockets; ++n) {
          if (fds[n].revents & POLLIN) {
-            success = _read_write (fds[n].fd, ssl, fd_client, fd_mongo);
+            success = _read_write (fds[n].fd, ssl, cfg.fd_client, fd_server);
          }
       }
    } while (success > 0);
@@ -658,9 +666,8 @@ fail:
    SSL_shutdown (ssl);
    SSL_free (ssl);
 
-   close (fd_client);
-   close (fd_mongo);
-   free (arg);
+   close (cfg.fd_client);
+   close (fd_server);
    fprintf (stderr, "Worker done\n");
    return (void *) EXIT_SUCCESS;
 }
@@ -670,16 +677,24 @@ main (int argc, char *argv[])
 {
    int sd;
    int fd;
-   int *args;
    int success;
+   worker_config *cfg = calloc (sizeof *cfg, 1);
 
 
-   sd = _socket (8888, bind);
+   if (argc != 3) {
+      fprintf (stderr, "usage: %s MY-PORT SERVER-PORT\n", argv[0]);
+      return 1;
+   }
+
+   sd = _socket (atoi(argv[1]), bind);
    if (!sd) {
       perror ("bind failed");
       return 1;
    }
+   cfg->server_port = atoi(argv[2]);
 
+   fprintf (stderr, "Daemon listening to %d\n", atoi(argv[1]));
+   fprintf (stderr, "The server will be listening to %d\n", cfg->server_port);
    listen (sd, 42);
 
    fprintf (stdout, "Ready...\n");
@@ -692,10 +707,9 @@ main (int argc, char *argv[])
          break;
       }
 
-      args = malloc (1);
-      *args = fd;
+      cfg->fd_client = fd;
 
-      success = pthread_create (&thread, NULL, worker, (void *) args);
+      success = pthread_create (&thread, NULL, worker, (void *) cfg);
       if (success < 0) {
          perror ("could not create thread");
          return 1;
@@ -705,5 +719,6 @@ main (int argc, char *argv[])
    } while (1);
    close (sd);
 
+   free (cfg);
    return 0;
 }
