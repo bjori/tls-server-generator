@@ -48,6 +48,11 @@
 #define EXT_KEY_USAGE_MSEFS 1 << 9
 #define EXT_KEY_USAGE_NSSGC 1 << 10
 
+#define MAX_B64_SIZE 1024
+#define MAX_CONFIG_SIZE MAX_B64_SIZE
+
+#define TOP_LEVEL_DOMAIN ".vcap.me"
+
 
 /* bind/connect declaration used as callback */
 typedef int (*cb) (int fd, __CONST_SOCKADDR_ARG, socklen_t addrlen);
@@ -57,7 +62,6 @@ typedef struct _worker_config {
    int fd_client;
    int server_port;
 } worker_config;
-
 
 // Holds all the TLS options configurable through the hostname.
 typedef struct _tls_options {
@@ -75,7 +79,8 @@ typedef struct _tls_options {
    char *issuer;       // Signing CA: root, intermediate, unknown
    int64_t not_before; // Not valid before datetime
    int64_t not_after;  // Not valid after datetime
-   char *san; // SAN: Subject Alt Names, list of IP Addresses or DNS names
+   char *san; // SAN: Subject Alt Names, list of IP Addresses or DNS names, eg
+              // "IP:127.0.0.1,DNS:server"
 
    // Basic Constraints
    int basic_constraints;
@@ -149,12 +154,156 @@ _mongoc_ssl_setup_pem_file (SSL_CTX *ssl_ctx, const char *pem_file)
    return 1;
 }
 
+char *
+_hostname_to_b64 (const char *servername)
+{
+   int i, j;
+   int server_len = strlen (servername);
+
+   if (strstr (servername, TOP_LEVEL_DOMAIN) == NULL) {
+      // hostnames must end with well known TOP_LEVEL_DOMAIN
+      return NULL;
+   }
+   server_len -= strlen (TOP_LEVEL_DOMAIN);
+
+   // Possibly need 3 extra bytes for '=' padding.
+   char *base64 = calloc (server_len + 4, 1);
+   if (!base64) {
+      return NULL;
+   }
+
+   // Remove '.' chunks added to create valid hostname labels and convert
+   // '.' to '+' and '-' to '/'.
+   for (i = 0, j = 0; i < server_len; i++) {
+      if ((i + 1) % 64 == 0) {
+         // Each 64th character must be a '.'
+         if (servername[i] != '.') {
+            free (base64);
+            return NULL;
+         }
+         continue;
+      }
+      char c = servername[i];
+      switch (c) {
+      case '.':
+         c = '+';
+         break;
+      case '-':
+         c = '/';
+         break;
+      default:
+         break;
+      }
+      base64[j++] = c;
+   }
+
+   // Add padding that was stripped because '=' is not a valid in a hostname.
+   while (j % 4) {
+      base64[j++] = '=';
+   }
+   return base64;
+}
+
+char *
+_b64_to_hostname (const char *b64)
+{
+   int i, j;
+   int b64_len = strlen (b64);
+
+   char *hostname = calloc (b64_len + 100, 1);
+   if (!hostname) {
+      return NULL;
+   }
+
+   // Add '.' chunks added to create valid hostname labels and convert
+   // '+' to '.' and '/' to '-'.
+   for (i = 0, j = 0; j < b64_len && b64[j] != '='; i++) {
+      if ((i + 1) % 64 == 0) {
+         // Each 64th character must be a '.'
+         hostname[i] = '.';
+         continue;
+      }
+      char c = b64[j++];
+      switch (c) {
+      case '+':
+         c = '.';
+         break;
+      case '/':
+         c = '-';
+         break;
+      default:
+         break;
+      }
+      hostname[i] = c;
+   }
+   for (j = 0; j < strlen (TOP_LEVEL_DOMAIN); j++) {
+      hostname[i++] = TOP_LEVEL_DOMAIN[j];
+   }
+   return hostname;
+}
+
+char *
+_config_to_hostname (const char *config)
+{
+   int config_len = strlen (config);
+   char b64_hostname[MAX_B64_SIZE] = {0};
+
+   int b64_len = mongoc_b64_ntop (
+      config, sizeof (config_len), b64_hostname, sizeof (b64_hostname));
+   if (-1 == b64_len) {
+      return NULL;
+   }
+   return _b64_to_hostname (b64_hostname);
+}
+
+char *
+_hostname_to_config (const char *hostname)
+{
+   char *b64_hostname = _hostname_to_b64 (hostname);
+   if (!b64_hostname) {
+      return NULL;
+   }
+   char *tls_config = calloc (MAX_CONFIG_SIZE, 1);
+   int tls_config_len;
+
+   tls_config_len = mongoc_b64_pton (b64_hostname, tls_config, MAX_CONFIG_SIZE);
+   free (b64_hostname);
+   if (-1 == tls_config_len) {
+      free (tls_config);
+      return NULL;
+   }
+   return tls_config;
+}
+
 int
 _mongoc_decode_hostname (const char *servername, tls_options *settings)
 {
    if (!servername || !settings) {
       return 0;
    }
+   char *tls_config = _hostname_to_config (servername);
+   if (!tls_config) {
+      return 0;
+   }
+
+   char *sep = "\n";
+   char *line, *key, *value, *last;
+   for (line = strtok_r (tls_config, sep, &last); line;
+        line = strtok_r (NULL, sep, &last)) {
+      key = line;
+      value = strchr (line, '=');
+      if (value) {
+         *value = '\0';
+         value++;
+      }
+      if (strcmp (key, "A") == 0) {
+      } else if (strcmp (key, "B") == 0) {
+      } else if (strcmp (key, "C") == 0) {
+      } else {
+         // Unknown key..
+      }
+   }
+   free (tls_config);
 
    settings->ciphers = strdup("HIGH:!EXPORT:!aNULL@STRENGTH");
    settings->cn = strdup(servername);
