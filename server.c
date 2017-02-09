@@ -19,7 +19,7 @@
 #include <openssl/x509.h>
 #include <openssl/x509v3.h>
 
-#include "mongoc-b64.h"
+#include "base32.h"
 
 #define CERT_GOOD_SERVER "server.pem"
 #define CERT_CA "ca.pem"
@@ -57,8 +57,8 @@
 #define TLS_VERSION_TLSv12 1 << 4
 #define TLS_VERSION_TLSv13 1 << 5
 
-#define MAX_B64_SIZE 1024
-#define MAX_CONFIG_SIZE MAX_B64_SIZE
+#define MAX_B32_SIZE 1024
+#define MAX_CONFIG_SIZE MAX_B32_SIZE
 
 #define TOP_LEVEL_DOMAIN ".vcap.me"
 
@@ -166,7 +166,7 @@ _mongoc_ssl_setup_pem_file (SSL_CTX *ssl_ctx, const char *pem_file)
 }
 
 char *
-_hostname_to_b64 (const char *servername)
+_hostname_to_b32 (const char *servername)
 {
    int i, j;
    int server_len = strlen (servername);
@@ -178,74 +178,45 @@ _hostname_to_b64 (const char *servername)
    server_len -= strlen (TOP_LEVEL_DOMAIN);
 
    // Possibly need 3 extra bytes for '=' padding.
-   char *base64 = calloc (server_len + 4, 1);
-   if (!base64) {
+   char *base32 = calloc (server_len + 4, 1);
+   if (!base32) {
       return NULL;
    }
 
-   // Remove '.' chunks added to create valid hostname labels and convert
-   // '.' to '+' and '-' to '/'.
+   // Remove '.' chunks added to create valid hostname labels.
    for (i = 0, j = 0; i < server_len; i++) {
       if ((i + 1) % 64 == 0) {
          // Each 64th character must be a '.'
          if (servername[i] != '.') {
-            free (base64);
+            free (base32);
             return NULL;
          }
          continue;
       }
-      char c = servername[i];
-      switch (c) {
-      case '.':
-         c = '+';
-         break;
-      case '-':
-         c = '/';
-         break;
-      default:
-         break;
-      }
-      base64[j++] = c;
+      base32[j++] = servername[i];
    }
-
-   // Add padding that was stripped because '=' is not a valid in a hostname.
-   while (j % 4) {
-      base64[j++] = '=';
-   }
-   return base64;
+   return base32;
 }
 
 char *
-_b64_to_hostname (const char *b64)
+_b32_to_hostname (const char *b32)
 {
    int i, j;
-   int b64_len = strlen (b64);
+   int b32_len = strlen (b32);
 
-   char *hostname = calloc (b64_len + 100, 1);
+   char *hostname = calloc (b32_len + 100, 1);
    if (!hostname) {
       return NULL;
    }
 
-   // Add '.' chunks added to create valid hostname labels and convert
-   // '+' to '.' and '/' to '-'.
-   for (i = 0, j = 0; j < b64_len && b64[j] != '='; i++) {
+   // Add '.' chunks added to create valid hostname labels.
+   for (i = 0, j = 0; j < b32_len && b32[j] != '='; i++) {
       if ((i + 1) % 64 == 0) {
          // Each 64th character must be a '.'
          hostname[i] = '.';
          continue;
       }
-      char c = b64[j++];
-      switch (c) {
-      case '+':
-         c = '.';
-         break;
-      case '/':
-         c = '-';
-         break;
-      default:
-         break;
-      }
-      hostname[i] = c;
+      hostname[i] = b32[j++];
    }
    for (j = 0; j < strlen (TOP_LEVEL_DOMAIN); j++) {
       hostname[i++] = TOP_LEVEL_DOMAIN[j];
@@ -257,31 +228,31 @@ char *
 _config_to_hostname (const char *config)
 {
    int config_len = strlen (config);
-   char b64_hostname[MAX_B64_SIZE] = {0};
+   char b32_hostname[MAX_B32_SIZE] = {0};
 
-   int b64_len = mongoc_b64_ntop ((const uint8_t *) config,
-                                  config_len,
-                                  b64_hostname,
-                                  sizeof (b64_hostname));
-   if (-1 == b64_len) {
+   int b32_len = base32_encode ((const uint8_t *) config,
+                                config_len,
+                                (uint8_t *) b32_hostname,
+                                sizeof (b32_hostname));
+   if (-1 == b32_len) {
       return NULL;
    }
-   return _b64_to_hostname (b64_hostname);
+   return _b32_to_hostname (b32_hostname);
 }
 
 char *
 _hostname_to_config (const char *hostname)
 {
-   char *b64_hostname = _hostname_to_b64 (hostname);
-   if (!b64_hostname) {
+   char *b32_hostname = _hostname_to_b32 (hostname);
+   if (!b32_hostname) {
       return NULL;
    }
    char *tls_config = calloc (MAX_CONFIG_SIZE, 1);
    int tls_config_len;
 
-   tls_config_len = mongoc_b64_pton (
-      (const char *) b64_hostname, (uint8_t *) tls_config, MAX_CONFIG_SIZE);
-   free (b64_hostname);
+   tls_config_len = base32_decode (
+      (const uint8_t *) b32_hostname, (uint8_t *) tls_config, MAX_CONFIG_SIZE);
+   free (b32_hostname);
    if (-1 == tls_config_len) {
       free (tls_config);
       return NULL;

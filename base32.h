@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 MongoDB Inc.
+ * Copyright 2017 MongoDB Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef MONGOC_B64_H
-#define MONGOC_B64_H
+#ifndef BASE32_H
+#define BASE32_H
 
 #define _GNU_SOURCE
 #include <stdlib.h>
@@ -24,16 +24,9 @@
 #include <ctype.h>
 
 
-int
-mongoc_b64_ntop (uint8_t const *src,
-                 size_t srclength,
-                 char *target,
-                 size_t targsize);
+int base32_decode(const uint8_t *encoded, uint8_t *result, int bufSize);
 
-void
-mongoc_b64_initialize_rmap (void);
+int base32_encode(const uint8_t *data, int length, uint8_t *result,
+                  int bufSize);
 
-int
-mongoc_b64_pton (char const *src, uint8_t *target, size_t targsize);
-
-#endif /* MONGOC_B64_H */
+#endif /* BASE32_H */
