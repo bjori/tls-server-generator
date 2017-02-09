@@ -132,7 +132,7 @@ _init_openssl ()
 }
 
 int
-_mongoc_ssl_setup_ca (SSL_CTX *ssl_ctx,
+_tlsgen_ssl_setup_ca (SSL_CTX *ssl_ctx,
                       const char *ca_file,
                       const char *ca_path)
 {
@@ -148,7 +148,7 @@ _mongoc_ssl_setup_ca (SSL_CTX *ssl_ctx,
 }
 
 int
-_mongoc_ssl_setup_pem_file (SSL_CTX *ssl_ctx, const char *pem_file)
+_tlsgen_ssl_setup_pem_file (SSL_CTX *ssl_ctx, const char *pem_file)
 {
    if (!SSL_CTX_use_certificate_chain_file (ssl_ctx, pem_file)) {
       return 0;
@@ -166,7 +166,7 @@ _mongoc_ssl_setup_pem_file (SSL_CTX *ssl_ctx, const char *pem_file)
 }
 
 char *
-_hostname_to_b32 (const char *servername)
+_tlsgen_hostname_to_b32 (const char *servername)
 {
    int i, j;
    int server_len = strlen (servername);
@@ -199,7 +199,7 @@ _hostname_to_b32 (const char *servername)
 }
 
 char *
-_b32_to_hostname (const char *b32)
+_tlsgen_b32_to_hostname (const char *b32)
 {
    int i, j;
    int b32_len = strlen (b32);
@@ -225,7 +225,7 @@ _b32_to_hostname (const char *b32)
 }
 
 char *
-_config_to_hostname (const char *config)
+_tlsgen_config_to_hostname (const char *config)
 {
    int config_len = strlen (config);
    char b32_hostname[MAX_B32_SIZE] = {0};
@@ -237,13 +237,13 @@ _config_to_hostname (const char *config)
    if (-1 == b32_len) {
       return NULL;
    }
-   return _b32_to_hostname (b32_hostname);
+   return _tlsgen_b32_to_hostname (b32_hostname);
 }
 
 char *
-_hostname_to_config (const char *hostname)
+_tlsgen_hostname_to_config (const char *hostname)
 {
-   char *b32_hostname = _hostname_to_b32 (hostname);
+   char *b32_hostname = _tlsgen_hostname_to_b32 (hostname);
    if (!b32_hostname) {
       return NULL;
    }
@@ -261,12 +261,12 @@ _hostname_to_config (const char *hostname)
 }
 
 int
-_mongoc_decode_hostname (const char *servername, tls_options *settings)
+_tlsgen_decode_hostname (const char *servername, tls_options *options)
 {
-   if (!servername || !settings) {
+   if (!servername || !options) {
       return 0;
    }
-   char *tls_config = _hostname_to_config (servername);
+   char *tls_config = _tlsgen_hostname_to_config (servername);
    if (!tls_config) {
       return 0;
    }
@@ -284,88 +284,88 @@ _mongoc_decode_hostname (const char *servername, tls_options *settings)
       }
       if (strcmp (key, "C") == 0) {
          // C = ciphers, string.
-         settings->ciphers = strdup (value);
+         options->ciphers = strdup (value);
       } else if (strcmp (key, "TV") == 0) {
          // TV = Acceptable TLS_VERSION_* versions, string int.
-         settings->tls_versions = atoi (value);
+         options->tls_versions = atoi (value);
       } else if (strcmp (key, "TC") == 0) {
          // TC = Enable TLS compression, value is optional
-         settings->tls_compression = 1;
+         options->tls_compression = 1;
       } else if (strcmp (key, "KF") == 0) {
          // KF = Use hard coded server PEM file, string.
-         settings->keyfile = strdup (value);
+         options->keyfile = strdup (value);
       } else if (strcmp (key, "CA") == 0) {
          // CA = Use hard coded server CA file, string.
-         settings->issuerfile = strdup (value);
-         settings->issuer = strdup (value);
+         options->issuerfile = strdup (value);
+         options->issuer = strdup (value);
       } else if (strcmp (key, "CN") == 0) {
          // CN = Common Name, string.
-         settings->cn = strdup (value);
+         options->cn = strdup (value);
       } else if (strcmp (key, "NB") == 0) {
          // NB = Not valid before datetime, string YYYY-[M]M-[D]D.
          struct tm tm = {0};
          char *rv = strptime (value, "%Y-%m-%d", &tm);
          if (rv) {
-            settings->not_before = mktime (&tm);
+            options->not_before = mktime (&tm);
          }
       } else if (strcmp (key, "NA") == 0) {
          // NA = Not valid after datetime, string YYYY-[M]M-[D]D.
          struct tm tm = {0};
          char *rv = strptime (value, "%Y-%m-%d", &tm);
          if (rv) {
-            settings->not_after = mktime (&tm);
+            options->not_after = mktime (&tm);
          }
       } else if (strcmp (key, "SAN") == 0) {
          // SAN = ubject Alt Names, string.
-         settings->san = strdup (value);
+         options->san = strdup (value);
       } else if (strcmp (key, "AS") == 0) {
          // AS = Add hostname to SAN.
          add_san = 1;
       } else if (strcmp (key, "BC") == 0) {
          // BC = Basic Constraints, string int.
-         settings->basic_constraints = atoi (value);
+         options->basic_constraints = atoi (value);
       } else if (strcmp (key, "KU") == 0) {
          // KU = Key Usage, string int.
-         settings->key_usage = atoi (value);
+         options->key_usage = atoi (value);
       } else if (strcmp (key, "EKU") == 0) {
          // EKU = Extended Key Usage, string int.
-         settings->ext_key_usage = atoi (value);
+         options->ext_key_usage = atoi (value);
       } else {
          // Unknown key..
       }
    }
 
    if (add_san) {
-      if (settings->san) {
+      if (options->san) {
          int size =
-            strlen (settings->san) + strlen (",DNS:") + strlen (servername) + 1;
+            strlen (options->san) + strlen (",DNS:") + strlen (servername) + 1;
          char *new_san = calloc (size, 1);
-         snprintf (new_san, size, "%s,DNS:%s", settings->san, servername);
-         free (settings->san);
-         settings->san = new_san;
+         snprintf (new_san, size, "%s,DNS:%s", options->san, servername);
+         free (options->san);
+         options->san = new_san;
       } else {
          int size = strlen ("DNS:") + strlen (servername) + 1;
-         settings->san = calloc (size, 1);
-         snprintf (settings->san, size, "DNS:%s", servername);
+         options->san = calloc (size, 1);
+         snprintf (options->san, size, "DNS:%s", servername);
       }
    }
    free (tls_config);
 
-   settings->tls_versions = TLS_VERSION_TLSv12;
-   settings->tls_compression = 0;
-   settings->cn = strdup (servername);
+   options->tls_versions = TLS_VERSION_TLSv12;
+   options->tls_compression = 0;
+   options->cn = strdup (servername);
    return 1;
 }
 
 
 int
-_mongoc_ssl_setup_certs (SSL_CTX *ssl_ctx, const char *ca, const char *private)
+_tlsgen_ssl_setup_certs (SSL_CTX *ssl_ctx, const char *ca, const char *private)
 {
-   if (!_mongoc_ssl_setup_ca (ssl_ctx, ca, NULL)) {
+   if (!_tlsgen_ssl_setup_ca (ssl_ctx, ca, NULL)) {
       return 0;
    }
 
-   if (!_mongoc_ssl_setup_pem_file (ssl_ctx, private)) {
+   if (!_tlsgen_ssl_setup_pem_file (ssl_ctx, private)) {
       return 0;
    }
    return 1;
@@ -379,7 +379,7 @@ fail (const char *msg)
 }
 
 int
-_mongoc_generate_csr (const char *servername, const tls_options *settings)
+_tlsgen_generate_csr (const char *servername, const tls_options *options)
 {
    RSA *rsa;
    EVP_PKEY *pkey;
@@ -417,13 +417,8 @@ _mongoc_generate_csr (const char *servername, const tls_options *settings)
       -1,
       -1,
       0);
-   X509_NAME_add_entry_by_txt (name,
-                               "CN",
-                               MBSTRING_ASC,
-                               (const unsigned char *) settings->cn,
-                               -1,
-                               -1,
-                               0);
+   X509_NAME_add_entry_by_txt (
+      name, "CN", MBSTRING_ASC, (const unsigned char *) options->cn, -1, -1, 0);
 
    X509_REQ_set_subject_name (x509req, name);
    X509_REQ_set_version (x509req, 2);
@@ -456,7 +451,7 @@ _mongoc_generate_csr (const char *servername, const tls_options *settings)
 }
 
 void
-_mongoc_basic_constraints_to_str (int flags, char *str)
+_tlsgen_basic_constraints_to_str (int flags, char *str)
 {
    int l = 0;
 
@@ -468,7 +463,7 @@ _mongoc_basic_constraints_to_str (int flags, char *str)
    }
 }
 void
-_mongoc_key_usage (int flags, char *str)
+_tlsgen_key_usage (int flags, char *str)
 {
    int l = 0;
 
@@ -502,7 +497,7 @@ _mongoc_key_usage (int flags, char *str)
 }
 
 void
-_mongoc_ext_key_usage (int flags, char *str)
+_tlsgen_ext_key_usage (int flags, char *str)
 {
    int l = 0;
 
@@ -542,13 +537,13 @@ _mongoc_ext_key_usage (int flags, char *str)
 }
 
 void
-_mongoc_x509_add_ext (X509 *x509gen, int type, char *value)
+_tlsgen_x509_add_ext (X509 *x509gen, int type, char *value)
 {
    X509_EXTENSION *ext = X509V3_EXT_conf_nid (NULL, NULL, type, value);
    X509_add_ext (x509gen, ext, -1);
 }
 int
-_mongoc_sign_csr (const char *servername, const tls_options *settings)
+_tlsgen_sign_csr (const char *servername, const tls_options *options)
 {
    BIO *out = NULL;
    BIO *x509bio = NULL;
@@ -588,15 +583,15 @@ _mongoc_sign_csr (const char *servername, const tls_options *settings)
    X509_set_serialNumber (x509gen, serial);
    X509_set_issuer_name (x509gen, X509_get_subject_name (cax509));
 
-   if (settings->not_before) {
+   if (options->not_before) {
       ASN1_TIME_set (X509_get_notBefore (x509gen),
-                     (time_t) settings->not_before);
+                     (time_t) options->not_before);
    } else {
       X509_gmtime_adj (X509_get_notBefore (x509gen), 0);
    }
 
-   if (settings->not_after) {
-      ASN1_TIME_set (X509_get_notAfter (x509gen), (time_t) settings->not_after);
+   if (options->not_after) {
+      ASN1_TIME_set (X509_get_notAfter (x509gen), (time_t) options->not_after);
    } else {
       X509_time_adj_ex (X509_get_notAfter (x509gen), 365, 0, NULL);
    }
@@ -608,30 +603,30 @@ _mongoc_sign_csr (const char *servername, const tls_options *settings)
    EVP_PKEY_free (pktmp);
 
 
-   if (settings->san) {
-      _mongoc_x509_add_ext (x509gen, NID_subject_alt_name, settings->san);
+   if (options->san) {
+      _tlsgen_x509_add_ext (x509gen, NID_subject_alt_name, options->san);
    }
 
-   if (settings->basic_constraints) {
+   if (options->basic_constraints) {
       char buf[1024];
 
-      _mongoc_basic_constraints_to_str (settings->basic_constraints,
+      _tlsgen_basic_constraints_to_str (options->basic_constraints,
                                         (char *) &buf);
-      _mongoc_x509_add_ext (x509gen, NID_basic_constraints, (char *) buf);
+      _tlsgen_x509_add_ext (x509gen, NID_basic_constraints, (char *) buf);
    }
 
-   if (settings->key_usage) {
+   if (options->key_usage) {
       char buf[1024];
 
-      _mongoc_key_usage (settings->key_usage, (char *) &buf);
-      _mongoc_x509_add_ext (x509gen, NID_key_usage, (char *) buf);
+      _tlsgen_key_usage (options->key_usage, (char *) &buf);
+      _tlsgen_x509_add_ext (x509gen, NID_key_usage, (char *) buf);
    }
 
-   if (settings->ext_key_usage) {
+   if (options->ext_key_usage) {
       char buf[1024];
 
-      _mongoc_ext_key_usage (settings->key_usage, (char *) &buf);
-      _mongoc_x509_add_ext (x509gen, NID_ext_key_usage, (char *) buf);
+      _tlsgen_ext_key_usage (options->key_usage, (char *) &buf);
+      _tlsgen_x509_add_ext (x509gen, NID_ext_key_usage, (char *) buf);
    }
 
    X509_sign (x509gen, capkey, EVP_sha256 ());
@@ -654,29 +649,29 @@ _mongoc_sign_csr (const char *servername, const tls_options *settings)
 }
 
 int
-_mongoc_generate_certificate_for (const char *servername, tls_options *settings)
+_tlsgen_generate_certificate_for (const char *servername, tls_options *options)
 {
    int pathlen = strlen (servername) + strlen ("certs/.key.pem") + 1;
    char *path = malloc (pathlen);
 
    snprintf (path, pathlen, "certs/%s.key.pem", servername);
 
-   _mongoc_generate_csr (servername, settings);
-   _mongoc_sign_csr (servername, settings);
-   settings->issuerfile = "ca.pem";
-   settings->keyfile = path;
+   _tlsgen_generate_csr (servername, options);
+   _tlsgen_sign_csr (servername, options);
+   options->issuerfile = "ca.pem";
+   options->keyfile = path;
 
    return 1;
 }
 
 SSL_CTX *
-_mongoc_ssl_make_ctx_for (const char *servername, const SSL_METHOD *method)
+_tlsgen_ssl_make_ctx_for (const char *servername, const SSL_METHOD *method)
 {
-   int options;
+   int opts;
    SSL_CTX *ssl_ctx;
-   tls_options *settings = calloc (sizeof *settings, 1);
+   tls_options *options = calloc (sizeof *options, 1);
 
-   _mongoc_decode_hostname (servername, settings);
+   _tlsgen_decode_hostname (servername, options);
 
 
    ssl_ctx = SSL_CTX_new (method);
@@ -686,64 +681,64 @@ _mongoc_ssl_make_ctx_for (const char *servername, const SSL_METHOD *method)
 
    SSL_CTX_clear_options (ssl_ctx, SSL_CTX_get_options (ssl_ctx));
 
-   options = SSL_OP_ALL | SSL_OP_SINGLE_DH_USE;
-   if (settings->tls_compression) {
+   opts = SSL_OP_ALL | SSL_OP_SINGLE_DH_USE;
+   if (options->tls_compression) {
       /* FIXME: It may be non-trivial to actually *enable* compression.. */
    } else {
-      options |= SSL_OP_NO_COMPRESSION;
+      opts |= SSL_OP_NO_COMPRESSION;
    }
 
-   if (settings->tls_versions) {
-      options |= SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_TLSv1 |
-                 SSL_OP_NO_TLSv1_1 | SSL_OP_NO_TLSv1_2;
-      if (settings->tls_versions & TLS_VERSION_SSLv2) {
-         options ^= SSL_OP_NO_SSLv2;
+   if (options->tls_versions) {
+      opts |= SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_TLSv1 |
+              SSL_OP_NO_TLSv1_1 | SSL_OP_NO_TLSv1_2;
+      if (options->tls_versions & TLS_VERSION_SSLv2) {
+         opts ^= SSL_OP_NO_SSLv2;
       }
-      if (settings->tls_versions & TLS_VERSION_SSLv3) {
-         options ^= SSL_OP_NO_SSLv3;
+      if (options->tls_versions & TLS_VERSION_SSLv3) {
+         opts ^= SSL_OP_NO_SSLv3;
       }
-      if (settings->tls_versions & TLS_VERSION_TLSv10) {
-         options ^= SSL_OP_NO_TLSv1;
+      if (options->tls_versions & TLS_VERSION_TLSv10) {
+         opts ^= SSL_OP_NO_TLSv1;
       }
-      if (settings->tls_versions & TLS_VERSION_TLSv11) {
-         options ^= SSL_OP_NO_TLSv1_1;
+      if (options->tls_versions & TLS_VERSION_TLSv11) {
+         opts ^= SSL_OP_NO_TLSv1_1;
       }
-      if (settings->tls_versions & TLS_VERSION_TLSv12) {
-         options ^= SSL_OP_NO_TLSv1_2;
+      if (options->tls_versions & TLS_VERSION_TLSv12) {
+         opts ^= SSL_OP_NO_TLSv1_2;
       }
    }
 
-   SSL_CTX_set_options (ssl_ctx, options);
-   if (!SSL_CTX_set_cipher_list (ssl_ctx, settings->ciphers)) {
+   SSL_CTX_set_options (ssl_ctx, opts);
+   if (!SSL_CTX_set_cipher_list (ssl_ctx, options->ciphers)) {
       goto fail;
    }
 
-   if (!settings->keyfile) {
-      _mongoc_generate_certificate_for (servername, settings);
+   if (!options->keyfile) {
+      _tlsgen_generate_certificate_for (servername, options);
    }
-   if (!strcmp (settings->keyfile, CERT_GOOD_SERVER)) {
-      if (!_mongoc_ssl_setup_certs (ssl_ctx, CERT_CA, CERT_GOOD_SERVER)) {
+   if (!strcmp (options->keyfile, CERT_GOOD_SERVER)) {
+      if (!_tlsgen_ssl_setup_certs (ssl_ctx, CERT_CA, CERT_GOOD_SERVER)) {
          goto fail;
       }
    } else {
-      if (!_mongoc_ssl_setup_certs (
-             ssl_ctx, settings->issuerfile, settings->keyfile)) {
+      if (!_tlsgen_ssl_setup_certs (
+             ssl_ctx, options->issuerfile, options->keyfile)) {
          goto fail;
       }
    }
 
    fprintf (stderr, "Certificated prepped and good to go!\n");
-   _free_tls_options (settings);
+   _free_tls_options (options);
    return ssl_ctx;
 
 fail:
    SSL_CTX_free (ssl_ctx);
-   free (settings);
+   free (options);
    return NULL;
 }
 
 static int
-_mongoc_ssl_servername_callback (SSL *ssl, int *ad, void *arg)
+_tlsgen_ssl_servername_callback (SSL *ssl, int *ad, void *arg)
 {
    SSL_CTX *ctx;
    const char *servername;
@@ -759,7 +754,7 @@ _mongoc_ssl_servername_callback (SSL *ssl, int *ad, void *arg)
 
 
    fprintf (stderr, "Making CTX for %s\n", servername);
-   ctx = _mongoc_ssl_make_ctx_for (servername, SSL_get_ssl_method (ssl));
+   ctx = _tlsgen_ssl_make_ctx_for (servername, SSL_get_ssl_method (ssl));
 
    if (ctx) {
       SSL_set_SSL_CTX (ssl, ctx);
@@ -770,7 +765,7 @@ _mongoc_ssl_servername_callback (SSL *ssl, int *ad, void *arg)
 }
 
 SSL_CTX *
-mongoc_ssl_ctx_new ()
+_tlsgen_ssl_ctx_new ()
 {
    SSL_CTX *ssl_ctx;
    const SSL_METHOD *method;
@@ -792,7 +787,7 @@ mongoc_ssl_ctx_new ()
    SSL_CTX_set_options (ssl_ctx, options);
 
    SSL_CTX_set_tlsext_servername_callback (ssl_ctx,
-                                           _mongoc_ssl_servername_callback);
+                                           _tlsgen_ssl_servername_callback);
 
    // SSL_CTX_set_verify (ssl_ctx, SSL_VERIFY_PEER, NULL);
    SSL_CTX_set_mode (ssl_ctx, SSL_MODE_AUTO_RETRY);
@@ -801,7 +796,7 @@ mongoc_ssl_ctx_new ()
 }
 
 SSL *
-mongoc_ssl_new (SSL_CTX *ssl_ctx)
+_tlsgen_ssl_new (SSL_CTX *ssl_ctx)
 {
    SSL *ssl = NULL;
 
@@ -811,13 +806,13 @@ mongoc_ssl_new (SSL_CTX *ssl_ctx)
 }
 
 SSL *
-mongoc_stream_ssl_wrap (int fd)
+_tlsgen_stream_ssl_wrap (int fd)
 {
    SSL_CTX *ssl_ctx = NULL;
    SSL *ssl = NULL;
 
-   ssl_ctx = mongoc_ssl_ctx_new ();
-   ssl = mongoc_ssl_new (ssl_ctx);
+   ssl_ctx = _tlsgen_ssl_ctx_new ();
+   ssl = _tlsgen_ssl_new (ssl_ctx);
    SSL_CTX_free (ssl_ctx);
 
    SSL_set_fd (ssl, fd);
@@ -827,7 +822,7 @@ mongoc_stream_ssl_wrap (int fd)
 }
 
 int
-_socket (int port, cb func)
+_tlsgen_socket (int port, cb func)
 {
    struct sockaddr_in addr;
    int fd;
@@ -851,7 +846,7 @@ _socket (int port, cb func)
 }
 
 int
-_read_write (int polled, SSL *ssl, int fd_ssl, int fd_plain)
+_tlsgen_read_write (int polled, SSL *ssl, int fd_ssl, int fd_plain)
 {
    char buffer[8192];
    ssize_t size = 0;
@@ -878,7 +873,7 @@ worker (void *arg)
    struct pollfd fds[sockets];
    SSL *ssl;
 
-   fd_server = _socket (27017, connect);
+   fd_server = _tlsgen_socket (27017, connect);
    if (!fd_server) {
       perror ("connect failed");
       return (void *) 1;
@@ -886,7 +881,7 @@ worker (void *arg)
 
    _init_openssl ();
 
-   ssl = mongoc_stream_ssl_wrap (cfg.fd_client);
+   ssl = _tlsgen_stream_ssl_wrap (cfg.fd_client);
    int ret = SSL_do_handshake (ssl);
    if (ret < 1) {
       /* should the test suite determine if it failed or not? */
@@ -910,7 +905,8 @@ worker (void *arg)
 
       for (n = 0; n < sockets; ++n) {
          if (fds[n].revents & POLLIN) {
-            success = _read_write (fds[n].fd, ssl, cfg.fd_client, fd_server);
+            success =
+               _tlsgen_read_write (fds[n].fd, ssl, cfg.fd_client, fd_server);
          }
       }
    } while (success > 0);
@@ -929,12 +925,12 @@ int
 test_hostname_conversion (char *config)
 {
    printf ("Hostname config:\n%s\n", config);
-   char *hostname = _config_to_hostname (config);
+   char *hostname = _tlsgen_config_to_hostname (config);
    if (hostname == NULL) {
       return 1;
    }
    printf ("encoded hostname: %s\n", hostname);
-   char *decoded_config = _hostname_to_config (hostname);
+   char *decoded_config = _tlsgen_hostname_to_config (hostname);
    free (hostname);
    if (hostname == NULL) {
       return 1;
@@ -988,7 +984,7 @@ main (int argc, char *argv[])
       return 1;
    }
 
-   sd = _socket (atoi (argv[1]), bind);
+   sd = _tlsgen_socket (atoi (argv[1]), bind);
    if (!sd) {
       perror ("bind failed");
       return 1;
