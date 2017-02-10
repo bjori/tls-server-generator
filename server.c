@@ -259,6 +259,27 @@ _tlsgen_hostname_to_config (const char *hostname)
    }
    return tls_config;
 }
+void
+_tlsgen_add_san (tls_options *options, const char *servername)
+{
+   int size = strlen ("DNS:") + strlen (servername) + 1;
+
+   if (options->san) {
+      char *new_san;
+
+      /* +1 for the extra comma */
+      size += strlen (options->san) + 1;
+      new_san = calloc (size, 1);
+
+      snprintf (new_san, size, "%s,DNS:%s", options->san, servername);
+      free (options->san);
+      options->san = new_san;
+   } else {
+      options->san = calloc (size, 1);
+      snprintf (options->san, size, "DNS:%s", servername);
+   }
+}
+
 
 int
 _tlsgen_decode_hostname (const char *servername, tls_options *options)
@@ -365,22 +386,7 @@ _tlsgen_decode_hostname (const char *servername, tls_options *options)
    }
 
    if (add_san) {
-      int size = strlen ("DNS:") + strlen (servername) + 1;
-
-      if (options->san) {
-         char *new_san;
-
-         /* +1 for the extra comma */
-         size += strlen (options->san) + 1;
-         new_san = calloc (size, 1);
-
-         snprintf (new_san, size, "%s,DNS:%s", options->san, servername);
-         free (options->san);
-         options->san = new_san;
-      } else {
-         options->san = calloc (size, 1);
-         snprintf (options->san, size, "DNS:%s", servername);
-      }
+      _tlsgen_add_san (options, servername);
    }
    free (tls_config);
    return 1;
