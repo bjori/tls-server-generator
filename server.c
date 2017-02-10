@@ -756,7 +756,7 @@ _tlsgen_ssl_make_ctx_for (const char *servername, const SSL_METHOD *method)
       goto fail;
    }
 
-   fprintf (stderr, "Certificated prepped and good to go!\n");
+   fprintf (stderr, "Certificate prepped and good to go!\n");
    _free_tls_options (options);
    return ssl_ctx;
 
