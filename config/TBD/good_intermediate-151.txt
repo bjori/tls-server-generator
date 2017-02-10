@@ -1,0 +1,9 @@
+C=HIGH:!EXPORT:!aNULL@STRENGTH
+CA=CAs/intermediate-151.key.pem
+NB=2017-2-1
+NA=2018-2-1
+SAN=IP:127.0.0.1
+AS
+BC=2
+KU=1
+EKU=7
