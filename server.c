@@ -21,9 +21,10 @@
 
 #include "base32.h"
 
-#define CERT_GOOD_SERVER "server.pem"
-#define CERT_CA "ca.pem"
-#define INTERMEDIATE_CA "intermediate_ca.pem"
+#define CERT_SERVER "server.pem"
+#define CERT_CA_ROOT "ca.pem"
+#define CERT_CA_INTERMEDIATE "intermediate.pem"
+#define CERT_CA_UNKNOWN "unknown.pem"
 
 #define BASIC_CONSTRAINTS_CA_TRUE 1 << 0
 #define BASIC_CONSTRAINTS_CA_FALSE 1 << 1
@@ -84,11 +85,10 @@ typedef struct _tls_options {
 
    // Use hard coded server PEM file
    char *keyfile;
-   char *issuerfile;
 
    // Certificate Generation Options
    char *cn;          // CN: Common Name
-   char *issuer;      // Signing CA: root, intermediate, unknown
+   char *issuerfile;  // Signing CA: root, intermediate, unknown
    time_t not_before; // Not valid before time
    time_t not_after;  // Not valid after time
    char *san; // SAN: Subject Alt Names, list of IP Addresses or DNS names, eg
@@ -115,8 +115,8 @@ _free_tls_options (tls_options *options)
    if (options->cn) {
       free (options->cn);
    }
-   if (options->issuer) {
-      free (options->issuer);
+   if (options->issuerfile) {
+      free (options->issuerfile);
    }
    if (options->san) {
       free (options->san);
@@ -263,27 +263,42 @@ _tlsgen_hostname_to_config (const char *hostname)
 int
 _tlsgen_decode_hostname (const char *servername, tls_options *options)
 {
+   char *tls_config;
+   char *sep = "\n";
+   char *line, *key, *value, *last;
+   int add_san = 0;
+
    if (!servername || !options) {
       return 0;
    }
-   char *tls_config = _tlsgen_hostname_to_config (servername);
+
+   tls_config = _tlsgen_hostname_to_config (servername);
    if (!tls_config) {
       return 0;
    }
 
-   char *sep = "\n";
-   char *line, *key, *value, *last;
-   int add_san = 0;
+   /* Default values */
+   options->issuerfile = strdup (CERT_CA_ROOT);
+   options->ciphers = strdup ("HIGH:!EXPORT:!aNULL@STRENGTH");
+   options->cn = strdup (servername);
+   options->tls_versions = TLS_VERSION_TLSv12;
+   options->tls_compression = 0;
+
+
    for (line = strtok_r (tls_config, sep, &last); line;
         line = strtok_r (NULL, sep, &last)) {
       key = line;
       value = strchr (line, '=');
+
       if (value) {
          *value = '\0';
          value++;
       }
+
+
       if (strcmp (key, "C") == 0) {
          // C = ciphers, string.
+         free (options->ciphers);
          options->ciphers = strdup (value);
       } else if (strcmp (key, "TV") == 0) {
          // TV = Acceptable TLS_VERSION_* versions, string int.
@@ -293,18 +308,30 @@ _tlsgen_decode_hostname (const char *servername, tls_options *options)
          options->tls_compression = 1;
       } else if (strcmp (key, "KF") == 0) {
          // KF = Use hard coded server PEM file, string.
+         free (options->keyfile);
          options->keyfile = strdup (value);
       } else if (strcmp (key, "CA") == 0) {
          // CA = Use hard coded server CA file, string.
-         options->issuerfile = strdup (value);
-         options->issuer = strdup (value);
+         free (options->issuerfile);
+         if (!strcmp (value, "root")) {
+            options->issuerfile = strdup (CERT_CA_ROOT);
+         } else if (!strcmp (value, "intermediate")) {
+            options->issuerfile = strdup (CERT_CA_INTERMEDIATE);
+         } else if (!strcmp (value, "unknown")) {
+            options->issuerfile = strdup (CERT_CA_UNKNOWN);
+         } else {
+            fprintf (stderr, "Unknown issuer file to load: '%s'\n", value);
+            abort ();
+         }
       } else if (strcmp (key, "CN") == 0) {
          // CN = Common Name, string.
+         free (options->cn);
          options->cn = strdup (value);
       } else if (strcmp (key, "NB") == 0) {
          // NB = Not valid before datetime, string YYYY-[M]M-[D]D.
          struct tm tm = {0};
          char *rv = strptime (value, "%Y-%m-%d", &tm);
+
          if (rv) {
             options->not_before = mktime (&tm);
          }
@@ -312,6 +339,7 @@ _tlsgen_decode_hostname (const char *servername, tls_options *options)
          // NA = Not valid after datetime, string YYYY-[M]M-[D]D.
          struct tm tm = {0};
          char *rv = strptime (value, "%Y-%m-%d", &tm);
+
          if (rv) {
             options->not_after = mktime (&tm);
          }
@@ -331,29 +359,30 @@ _tlsgen_decode_hostname (const char *servername, tls_options *options)
          // EKU = Extended Key Usage, string int.
          options->ext_key_usage = atoi (value);
       } else {
-         // Unknown key..
+         fprintf (stderr, "Unknown key provided: '%s'\n", key);
+         abort ();
       }
    }
 
    if (add_san) {
+      int size = strlen ("DNS:") + strlen (servername) + 1;
+
       if (options->san) {
-         int size =
-            strlen (options->san) + strlen (",DNS:") + strlen (servername) + 1;
-         char *new_san = calloc (size, 1);
+         char *new_san;
+
+         /* +1 for the extra comma */
+         size += strlen (options->san) + 1;
+         new_san = calloc (size, 1);
+
          snprintf (new_san, size, "%s,DNS:%s", options->san, servername);
          free (options->san);
          options->san = new_san;
       } else {
-         int size = strlen ("DNS:") + strlen (servername) + 1;
          options->san = calloc (size, 1);
          snprintf (options->san, size, "DNS:%s", servername);
       }
    }
    free (tls_config);
-
-   options->tls_versions = TLS_VERSION_TLSv12;
-   options->tls_compression = 0;
-   options->cn = strdup (servername);
    return 1;
 }
 
@@ -559,7 +588,7 @@ _tlsgen_sign_csr (const char *servername, const tls_options *options)
 
    snprintf (path, pathlen, "certs/%s.csr.pem", servername);
 
-   cabio = BIO_new_file ("ca.pem", "r");
+   cabio = BIO_new_file (options->issuerfile, "r");
    capkey = PEM_read_bio_PrivateKey (cabio, NULL, 0, NULL);
    cax509 = PEM_read_bio_X509 (cabio, NULL, 0, NULL);
    if (!capkey) {
@@ -658,7 +687,6 @@ _tlsgen_generate_certificate_for (const char *servername, tls_options *options)
 
    _tlsgen_generate_csr (servername, options);
    _tlsgen_sign_csr (servername, options);
-   options->issuerfile = "ca.pem";
    options->keyfile = path;
 
    return 1;
@@ -716,15 +744,10 @@ _tlsgen_ssl_make_ctx_for (const char *servername, const SSL_METHOD *method)
    if (!options->keyfile) {
       _tlsgen_generate_certificate_for (servername, options);
    }
-   if (!strcmp (options->keyfile, CERT_GOOD_SERVER)) {
-      if (!_tlsgen_ssl_setup_certs (ssl_ctx, CERT_CA, CERT_GOOD_SERVER)) {
-         goto fail;
-      }
-   } else {
-      if (!_tlsgen_ssl_setup_certs (
-             ssl_ctx, options->issuerfile, options->keyfile)) {
-         goto fail;
-      }
+
+   if (!_tlsgen_ssl_setup_certs (
+          ssl_ctx, options->issuerfile, options->keyfile)) {
+      goto fail;
    }
 
    fprintf (stderr, "Certificated prepped and good to go!\n");
@@ -837,6 +860,9 @@ _tlsgen_socket (int port, cb func)
    addr.sin_addr.s_addr = INADDR_ANY;
    addr.sin_port = htons (port);
 
+   success = 1;
+   setsockopt (fd, SOL_SOCKET, SO_REUSEADDR, &success, sizeof (int));
+   setsockopt (fd, SOL_SOCKET, SO_REUSEPORT, &success, sizeof (int));
    success = func (fd, (struct sockaddr *) &addr, sizeof (addr));
    if (success < 0) {
       return 0;
@@ -872,6 +898,7 @@ worker (void *arg)
    int sockets = 2;
    struct pollfd fds[sockets];
    SSL *ssl;
+   int ret;
 
    fd_server = _tlsgen_socket (27017, connect);
    if (!fd_server) {
@@ -882,7 +909,7 @@ worker (void *arg)
    _init_openssl ();
 
    ssl = _tlsgen_stream_ssl_wrap (cfg.fd_client);
-   int ret = SSL_do_handshake (ssl);
+   ret = SSL_do_handshake (ssl);
    if (ret < 1) {
       /* should the test suite determine if it failed or not? */
       fprintf (stderr, "Handhsake failed\n");
