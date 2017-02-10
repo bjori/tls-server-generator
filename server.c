@@ -341,8 +341,8 @@ _tlsgen_decode_hostname (const char *servername, tls_options *options)
          } else if (!strcmp (value, "unknown")) {
             options->issuerfile = strdup (CERT_CA_UNKNOWN);
          } else {
-            fprintf (stderr, "Unknown issuer file to load: '%s'\n", value);
-            abort ();
+            fprintf (stderr, "Using custom CA: %s\n", value);
+            options->issuerfile = strdup (value);
          }
       } else if (strcmp (key, "CN") == 0) {
          // CN = Common Name, string.
