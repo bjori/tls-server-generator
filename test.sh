@@ -28,6 +28,11 @@ FAIL="
 mongodb://some.server.fail.vcap.me:8888/?ssl=true&sslCertificateAuthorityFile=$ROOT/tests/x509gen/ca.pem
 ";
 
+if [ "$#" -eq 1 ]; then
+   run_config_test $1
+   return
+fi
+
 echo "----------------------- SHOULD SUCCEED -----------------------"
 for i in $PASS; do
    run_test "$i"
@@ -36,6 +41,7 @@ done
 for good_config in ./config/good*; do
    run_config_test "$good_config"
 done
+
 
 echo "----------------------- SHOULD FAIL -----------------------"
 for i in $FAIL; do
