@@ -694,6 +694,34 @@ _tlsgen_generate_certificate_for (const char *servername, tls_options *options)
    _tlsgen_generate_csr (servername, options);
    _tlsgen_sign_csr (servername, options);
    options->keyfile = path;
+#if 0
+   for (int i=1; i<257; ++i) {
+      int pathlen = strlen (servername) + strlen ("certs/intermediate-100.key.pem") + 1;
+      char *path = malloc (pathlen);
+      int namelen = strlen("intermediate-100") + 1;
+      char *name = malloc (namelen);
+
+      snprintf (name, namelen, "intermediate-%d", i);
+      snprintf (path, pathlen, "certs/%s.key.pem", name);
+
+      free (options->cn);
+      options->cn = strdup (name);
+
+      free (options->issuerfile);
+      options->issuerfile = strdup(options->keyfile);
+
+      free (options->keyfile);
+      options->keyfile = strdup(path);
+
+      options->basic_constraints = BASIC_CONSTRAINTS_CA_TRUE;
+      _tlsgen_generate_csr (name, options);
+      _tlsgen_sign_csr (name, options);
+      options->keyfile = strdup(path);
+
+      free (path);
+      free (name);
+   }
+#endif
 
    return 1;
 }
